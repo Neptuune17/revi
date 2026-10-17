@@ -213,8 +213,32 @@ textarea.input { resize: vertical; line-height: 1.45; }
 }
 
 /* ---------- Accueil : paquets de fiches ---------- */
-.folder { margin-top: 26px; }
-.folder > h2 { font-size: 1rem; color: var(--ink-2); font-weight: 700; margin-bottom: 12px; }
+.shelf { margin-top: 26px; }
+.shelf > h2 { font-size: 1rem; color: var(--ink-2); font-weight: 700; margin-bottom: 12px; }
+
+/* Dossiers : chemises cartonnées avec un onglet */
+.folders { display: grid; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); gap: 26px 14px; padding-top: 12px; }
+.folder-tile {
+  position: relative; display: flex; flex-direction: column; gap: 4px; min-height: 122px; padding: 14px 14px 12px;
+  border-radius: 3px 12px 12px 12px; background: var(--pen-soft); color: var(--ink); text-decoration: none;
+  border: 1px solid color-mix(in srgb, var(--pen) 24%, transparent); transition: transform .15s ease, box-shadow .15s ease;
+}
+.folder-tile::before {
+  content: ""; position: absolute; left: -1px; top: -13px; width: 46%; height: 15px;
+  background: inherit; border: inherit; border-bottom: 0; border-radius: 8px 12px 0 0;
+}
+.folder-tile:hover { transform: translateY(-2px); box-shadow: var(--shadow-lift); }
+.folder-tile svg { color: var(--pen); margin-bottom: 2px; }
+.folder-tile b { font-size: 1.04rem; line-height: 1.25; overflow-wrap: anywhere; }
+.folder-tile .meta { font-size: .85rem; color: var(--ink-2); }
+.folder-tile .foot { margin-top: auto; padding-top: 8px; display: flex; flex-direction: column; gap: 5px; }
+.folder-tile .hlbar { background: color-mix(in srgb, var(--paper) 70%, transparent); }
+.checklist { display: grid; gap: 2px; max-height: 50vh; overflow-y: auto; margin: 0 -4px; padding: 0 4px; }
+.checklist .check { align-items: flex-start; padding: 8px 0; border-top: 1px solid var(--line); }
+.checklist .check:first-child { border-top: 0; }
+.checklist .check input { margin-top: 2px; }
+a.chip { text-decoration: none; gap: 6px; }
+a.chip:hover { background: color-mix(in srgb, var(--pen-soft) 70%, var(--pen) 30%); }
 .decks { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 18px 16px; }
 .deck {
   display: flex; flex-direction: column; gap: 6px; min-height: 148px; padding: 10px 16px 14px;

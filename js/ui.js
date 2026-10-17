@@ -65,6 +65,9 @@ const ICONS = {
   text: '<path d="M5 6h14M5 11h14M5 16h9"/>',
   install: '<rect x="6.5" y="2.8" width="11" height="18.4" rx="2.5"/><path d="M12 7.5v7M9 11.8l3 3 3-3"/>',
   restart: '<path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4.5 4v4h4"/>',
+  folder: '<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>',
+  folderPlus: '<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5h5"/>',
+  move: '<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M9 13.5h6M12.5 11l2.5 2.5-2.5 2.5"/>',
 };
 export function icon(name, size = 22, extra = {}) {
   const el = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
@@ -101,6 +104,60 @@ export function confirmDialog({ title, body, confirm = 'Confirmer', cancel = 'An
         cancel ? h('button', { type: 'button', class: 'btn btn-ghost', onclick: () => done(false) }, cancel) : null,
         h('button', { type: 'submit', class: 'btn ' + (danger ? 'btn-danger' : 'btn-primary'), autofocus: true }, confirm))));
     d.addEventListener('cancel', (e) => { e.preventDefault(); done(false); });
+    document.body.append(d);
+    d.showModal();
+  });
+}
+
+/**
+ * Demande un texte (ex. nom de dossier). validate(valeur) renvoie un message d'erreur ou null.
+ * Renvoie la valeur saisie (nettoyée) ou null si annulé.
+ */
+export function promptDialog({ title, label, value = '', placeholder = '', confirm = 'Valider', validate }) {
+  return new Promise((resolve) => {
+    const d = h('dialog', { class: 'modal' });
+    const input = h('input', { class: 'input', value, placeholder, maxlength: 60, 'aria-label': label || title });
+    const err = h('p', { class: 'small', style: { color: 'var(--red)' }, 'aria-live': 'polite' });
+    const done = (v) => { d.close(); d.remove(); resolve(v); };
+    d.append(h('form', { method: 'dialog', class: 'inner', onsubmit: (e) => {
+      e.preventDefault();
+      const v = input.value.trim();
+      const msg = validate ? validate(v) : (!v ? 'Ce champ est vide.' : null);
+      if (msg) { err.textContent = msg; input.focus(); return; }
+      done(v);
+    } },
+      h('h2', null, title),
+      label ? h('label', { class: 'field' }, h('span', null, label), input) : input,
+      err,
+      h('div', { class: 'btns' },
+        h('button', { type: 'button', class: 'btn btn-ghost', onclick: () => done(null) }, 'Annuler'),
+        h('button', { type: 'submit', class: 'btn btn-primary' }, confirm))));
+    d.addEventListener('cancel', (e) => { e.preventDefault(); done(null); });
+    document.body.append(d);
+    d.showModal();
+    requestAnimationFrame(() => { input.focus(); input.select(); });
+  });
+}
+
+/** Liste à cocher. items: [{value, label, hint}]. Renvoie les valeurs cochées, ou null si annulé. */
+export function checklistDialog({ title, body, items, confirm = 'Valider', empty = 'Rien à afficher.' }) {
+  return new Promise((resolve) => {
+    const d = h('dialog', { class: 'modal' });
+    const boxes = items.map((it) => ({ it, box: h('input', { type: 'checkbox', value: it.value }) }));
+    const done = (v) => { d.close(); d.remove(); resolve(v); };
+    const submit = h('button', { type: 'submit', class: 'btn btn-primary', disabled: true }, confirm);
+    const sync = () => { const n = boxes.filter((b) => b.box.checked).length; submit.disabled = !n; submit.textContent = n ? `${confirm} (${n})` : confirm; };
+    boxes.forEach((b) => b.box.addEventListener('change', sync));
+    d.append(h('form', { method: 'dialog', class: 'inner', onsubmit: (e) => { e.preventDefault(); done(boxes.filter((b) => b.box.checked).map((b) => b.it.value)); } },
+      h('h2', null, title),
+      body ? h('p', { class: 'muted' }, body) : null,
+      items.length ? h('div', { class: 'checklist' }, boxes.map(({ it, box }) =>
+        h('label', { class: 'check' }, box, h('span', null, it.label, it.hint ? h('span', { class: 'small muted', style: { display: 'block' } }, it.hint) : null))))
+        : h('p', { class: 'muted' }, empty),
+      h('div', { class: 'btns' },
+        h('button', { type: 'button', class: 'btn btn-ghost', onclick: () => done(null) }, 'Annuler'),
+        submit)));
+    d.addEventListener('cancel', (e) => { e.preventDefault(); done(null); });
     document.body.append(d);
     d.showModal();
   });

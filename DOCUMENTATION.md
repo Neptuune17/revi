@@ -4,7 +4,7 @@ Révi est une appli de fiches de révision (cartes, Apprendre, Test, Associer) q
 
 Ce fichier sert à reprendre le projet plus tard, seul ou avec Claude : il décrit l'architecture, les données, les règles de chaque mode, la mise en ligne et le débogage.
 
-Version documentée : **1.1.0** (17 octobre 2026).
+Version documentée : **1.2.0** (17 octobre 2026).
 
 ---
 
@@ -56,7 +56,8 @@ Après une modification du code, avant de remettre l'appli en ligne : **changer 
 | `js/ui.js` | Création d'éléments `h()`, `setChildren()`, `add()`, icônes SVG, toasts, dialogues, menus, contrôles segmentés. |
 | `js/version.js` | `APP_VERSION`. |
 | `js/sample.js` | Série d'exemple (connecteurs logiques en anglais). |
-| `js/views/home.js` | Accueil : séries par matière, recherche, écran vide. |
+| `js/views/home.js` | Accueil : boutons des dossiers, séries sans dossier, recherche, écran vide, bouton « Nouveau dossier ». Exporte `deckTile`, `sortSets`, `newFolder`, `folderPath`. |
+| `js/views/folder.js` | Page d'un dossier : ses séries, « Nouvelle série » pré-rangée, « Ajouter des séries » existantes, renommer, supprimer. |
 | `js/views/set.js` | Page d'une série : modes, progression, résultats (graphiques), liste des cartes, menu (copier, télécharger, réinitialiser, supprimer). |
 | `js/views/editor.js` | Création / modification d'une série et import de texte. |
 | `js/views/cards.js` | Mode Cartes. |
@@ -109,6 +110,8 @@ Navigation par le hash de l'adresse (`#/...`), donc aucune configuration serveur
 | `#/set/<id>` | Page de la série |
 | `#/set/<id>/edit` | Modifier la série |
 | `#/set/<id>/cards`, `/learn`, `/test`, `/match` | Modes d'étude |
+| `#/folder/<nom>` | Page d'un dossier (nom encodé avec `encodeURIComponent`) |
+| `#/new?folder=<nom>` | Nouvelle série pré-rangée dans un dossier |
 | `#/settings` | Réglages |
 
 Chaque vue est une fonction `xxxView(ctx)` qui reçoit :
@@ -132,7 +135,7 @@ Les méthodes natives `append()` et `replaceChildren()` affichent le texte « nu
 
 ### 4.1 Modèle
 
-Deux collections, avec la même clé (l'identifiant de la série) :
+Trois collections. `sets` et `progress` partagent la même clé (l'identifiant de la série) :
 
 **`sets/<setId>`** : la série et ses cartes.
 
@@ -162,6 +165,17 @@ Les cartes sont un **dictionnaire** indexé par identifiant, et non une liste : 
   "updatedAt": 1760710000000
 }
 ```
+
+**`folders/<folderId>`** : les dossiers, y compris vides.
+
+```json
+{ "name": "Anglais", "createdAt": 1760710000000, "updatedAt": 1760710000000 }
+```
+
+Une série est rangée dans un dossier par son champ texte `folder`, qui contient le **nom** du dossier, pas son identifiant. Les dossiers sont comparés sans tenir compte de la casse ni des espaces autour (`folderKey()`) : « anglais » rejoint « Anglais ». `store.folderList()` fusionne les documents `folders` et les noms cités par les séries. Les séries créées avant la version 1.2.0 apparaissent donc dans leur dossier même s'il n'a pas de document.
+
+- **Renommer un dossier** : renomme son ou ses documents et met à jour le champ `folder` de chaque série concernée.
+- **Supprimer un dossier** : supprime ses documents et vide le champ `folder` de ses séries. Les séries ne sont jamais supprimées.
 
 Niveaux d'une carte (`lvl`) :
 
@@ -197,17 +211,18 @@ Toute écriture est un objet imbriqué, fusionné en profondeur dans le document
 
 - **Lecture** :
   - `state.sets`, `state.progress` ;
-  - `getSet(id)`, `cardsOf(set)` (liste triée), `progressOf(id)`, `cardProgress(id, cardId)`, `statusOf(id, cardId)`, `sessionsOf(id)` (plus récente d'abord), `lastStudied(id)`, `folders()`.
-- **Séries** : `createSet({...})` (renvoie l'id), `updateSet(id, {title, folder, termLang, defLang, cards})` (calcule la différence avec l'existant), `toggleStar`, `deleteSet`.
+  - `getSet(id)`, `cardsOf(set)` (liste triée), `progressOf(id)`, `cardProgress(id, cardId)`, `statusOf(id, cardId)`, `sessionsOf(id)` (plus récente d'abord), `lastStudied(id)`, `folders()` (noms), `folderList()`, `getFolder(nom)`, `canonicalFolder(nom)`.
+- **Séries** : `createSet({...})` (renvoie l'id), `updateSet(id, {title, folder, termLang, defLang, cards})` (calcule la différence avec l'existant), `toggleStar`, `deleteSet`. Le dossier indiqué est créé s'il n'existe pas.
+- **Dossiers** : `createFolder(nom)` (renvoie le nom exact), `renameFolder(ancien, nouveau)` (refuse un nom déjà pris), `deleteFolder(nom)`, `moveSetsToFolder(ids, nom)`.
 - **Progression** : `recordAnswer(id, cardId, ok, lvl?)`, `adjustCounts`, `setLevel`, `resetLearn`, `addSession(id, session, existingId?)`, `setBestMatch(id, ms)`.
-- **Sauvegarde** : `exportAll()`, `importAll(data)` (fusion), `copyInto(data)`.
+- **Sauvegarde** : `exportAll()`, `importAll(data)` (fusion), `copyInto(data)`. Les dossiers sont inclus.
 - **État** : `mode` (`local`/`cloud`), `user`, `pending` (envois en attente), `fromCache`, `online`, `cloudConfigured`, `cloudError`, `ready`, `requireLogin`, `allowSignup`, `accessDenied`.
 
 ### 4.4 Clés `localStorage`
 
 | Clé | Contenu |
 |---|---|
-| `revi.data.v1` | Données du mode local `{ sets, progress }`. |
+| `revi.data.v1` | Données du mode local `{ sets, progress, folders }`. |
 | `revi.data.v1.backup` | Copie des données locales faite au moment de leur envoi dans le compte. |
 | `revi.theme` | `auto` / `light` / `dark`. |
 | `revi.lastMode` | `local` / `cloud` (pour savoir s'il faut attendre Firebase au démarrage). |
@@ -217,7 +232,7 @@ Toute écriture est un objet imbriqué, fusionné en profondeur dans le document
 
 ### 4.5 Firestore
 
-- Chemins : `users/{uid}/sets/{setId}` et `users/{uid}/progress/{setId}`.
+- Chemins : `users/{uid}/sets/{setId}`, `users/{uid}/progress/{setId}` et `users/{uid}/folders/{folderId}`. Les règles existantes couvrent déjà les dossiers : rien à changer dans la console.
 - Règles (`firestore.rules`) : chaque utilisateur ne lit et n'écrit que sous `users/{son uid}`.
 - Cache hors ligne : `persistentLocalCache` avec gestion multi-onglets. Si IndexedDB est indisponible, l'appli bascule sur un cache en mémoire.
 - `ignoreUndefinedProperties: true` : une valeur `undefined` oubliée ne fait pas échouer l'écriture.
@@ -495,6 +510,12 @@ python3 tests/gate_smoke.py
 
 ## 12. Historique des versions
 
+- **1.2.0** (17 octobre 2026) : dossiers.
+  - Bouton « Nouveau dossier » sur l'accueil : on peut créer un dossier vide.
+  - Les dossiers s'affichent en boutons sur l'accueil. Chaque bouton ouvre la page du dossier avec ses séries.
+  - Page d'un dossier : nouvelle série pré-rangée, ajout de séries existantes, renommer, supprimer (les séries sont conservées).
+  - Champ « Matière » de l'éditeur renommé en « Dossier ».
+  - La puce du dossier sur la page d'une série ouvre le dossier, et le bouton retour y ramène.
 - **1.1.0** (17 octobre 2026) :
   - option `requireLogin` : écran de connexion obligatoire ;
   - option `allowSignup` ;

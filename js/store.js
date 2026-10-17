@@ -3,7 +3,8 @@
 //   - LocalBackend : données dans localStorage (mode hors compte / sans Firebase).
 //   - CloudBackend (cloud.js) : Firestore avec cache hors ligne, données sous users/{uid}/...
 // Chaque écriture est un "patch" (objet imbriqué) fusionné en profondeur, avec DELETE et inc() comme sentinelles.
-// Collections : "sets" (séries et cartes) et "progress" (progression, sessions, records), clé = id de la série.
+// Collections : "sets" (séries et cartes), "progress" (progression, sessions, records ; clé = id de la série)
+// et "folders" (dossiers, y compris vides). Une série appartient à un dossier par son champ texte `folder` (nom du dossier).
 
 import { DELETE, inc, deepMerge, uid, ls, isPlainObject } from './util.js';
 import { APP_VERSION } from './version.js';
@@ -11,21 +12,24 @@ import { APP_VERSION } from './version.js';
 export const LS_DATA = 'revi.data.v1';
 const MAX_SESSIONS = 60;
 
-const emptyData = () => ({ sets: {}, progress: {} });
+const emptyData = () => ({ sets: {}, progress: {}, folders: {} });
+const withFolders = (d) => ({ sets: d.sets || {}, progress: d.progress || {}, folders: d.folders || {} });
+/** Clé de comparaison des noms de dossier (insensible à la casse et aux espaces autour). */
+export const folderKey = (name) => String(name || '').trim().toLocaleLowerCase('fr');
 
 export class LocalBackend {
   constructor(key = LS_DATA) {
     this.kind = 'local';
     this.key = key;
     const saved = ls.get(key);
-    this.data = saved && saved.sets ? { sets: saved.sets || {}, progress: saved.progress || {} } : emptyData();
+    this.data = saved && saved.sets ? withFolders(saved) : emptyData();
   }
   start(onData) {
     this.onData = onData;
     this._onStorage = (e) => {
       if (e.key !== this.key) return;
       const saved = ls.get(this.key);
-      this.data = saved && saved.sets ? saved : emptyData();
+      this.data = saved && saved.sets ? withFolders(saved) : emptyData();
       this.onData(this.data, {});
     };
     window.addEventListener('storage', this._onStorage);
@@ -52,7 +56,7 @@ export class LocalBackend {
 
 export const store = {
   state: {
-    sets: {}, progress: {}, ready: false, mode: 'local', user: null,
+    sets: {}, progress: {}, folders: {}, ready: false, mode: 'local', user: null,
     pending: false, fromCache: false, online: navigator.onLine, cloudConfigured: false, cloudError: null,
     requireLogin: false, allowSignup: true, accessDenied: false,
   },
@@ -74,6 +78,7 @@ export const store = {
     backend.start((data, meta = {}) => {
       this.state.sets = data.sets || {};
       this.state.progress = data.progress || {};
+      this.state.folders = data.folders || {};
       this.state.pending = !!meta.pending;
       this.state.fromCache = !!meta.fromCache;
       this.state.ready = true;
@@ -103,13 +108,76 @@ export const store = {
     return Object.entries(s).map(([id, v]) => ({ id, ...v })).sort((a, b) => (b.at || 0) - (a.at || 0));
   },
   lastStudied(setId) { const s = this.sessionsOf(setId)[0]; return s ? s.at : 0; },
-  folders() {
-    return [...new Set(Object.values(this.state.sets).map((s) => (s.folder || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b, 'fr'));
+  /** Noms de tous les dossiers (pour les listes de choix). */
+  folders() { return this.folderList().map((f) => f.name); },
+  /**
+   * Tous les dossiers : ceux enregistrés dans "folders" (même vides) et ceux cités par une série.
+   * @returns {{key:string, id:string|null, name:string, setIds:string[]}[]}
+   */
+  folderList() {
+    const map = new Map();
+    for (const [id, f] of Object.entries(this.state.folders || {})) {
+      const name = (f.name || '').trim(); const k = folderKey(name);
+      if (name && !map.has(k)) map.set(k, { key: k, id, name, setIds: [] });
+    }
+    for (const [sid, s] of Object.entries(this.state.sets)) {
+      const name = (s.folder || '').trim(); const k = folderKey(name);
+      if (!name) continue;
+      if (!map.has(k)) map.set(k, { key: k, id: null, name, setIds: [] });
+      map.get(k).setIds.push(sid);
+    }
+    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+  },
+  getFolder(name) { const k = folderKey(name); return k ? this.folderList().find((f) => f.key === k) || null : null; },
+  /** Nom exact d'un dossier existant portant ce nom (casse comprise), sinon le nom nettoyé. */
+  canonicalFolder(name) { const n = String(name || '').trim(); return n ? (this.getFolder(n)?.name || n) : ''; },
+
+  // ---------- Écriture : dossiers ----------
+  /** Crée le dossier s'il n'existe pas encore. Renvoie son nom exact. */
+  createFolder(name) {
+    const n = String(name || '').trim().slice(0, 60);
+    if (!n) throw new Error('Donnez un nom au dossier.');
+    const f = this.getFolder(n);
+    if (f && f.id) return f.name;
+    const finalName = f ? f.name : n;
+    const now = Date.now();
+    this.backend.apply('folders', uid('f'), { name: finalName, createdAt: now, updatedAt: now });
+    return finalName;
+  },
+  renameFolder(oldName, newName) {
+    const f = this.getFolder(oldName);
+    const n = String(newName || '').trim().slice(0, 60);
+    if (!f) throw new Error('Dossier introuvable.');
+    if (!n) throw new Error('Donnez un nom au dossier.');
+    const other = this.getFolder(n);
+    if (other && other.key !== f.key) throw new Error('Un dossier porte déjà ce nom.');
+    const now = Date.now();
+    // Tous les documents de ce dossier (il peut exister des doublons créés hors ligne sur deux appareils).
+    const docs = Object.entries(this.state.folders || {}).filter(([, d]) => folderKey(d.name) === f.key);
+    if (docs.length) docs.forEach(([id]) => this.backend.apply('folders', id, { name: n, updatedAt: now }));
+    else this.backend.apply('folders', uid('f'), { name: n, createdAt: now, updatedAt: now });
+    f.setIds.forEach((sid) => this.backend.apply('sets', sid, { folder: n, updatedAt: now }));
+    return n;
+  },
+  /** Supprime le dossier. Ses séries ne sont pas supprimées : elles passent « sans dossier ». */
+  deleteFolder(name) {
+    const f = this.getFolder(name);
+    if (!f) return 0;
+    const now = Date.now();
+    f.setIds.forEach((sid) => this.backend.apply('sets', sid, { folder: '', updatedAt: now }));
+    Object.entries(this.state.folders || {}).forEach(([id, d]) => { if (folderKey(d.name) === f.key) this.backend.remove('folders', id); });
+    return f.setIds.length;
+  },
+  moveSetsToFolder(setIds, name) {
+    const n = name ? this.createFolder(name) : '';
+    const now = Date.now();
+    setIds.forEach((sid) => { if (this.state.sets[sid]) this.backend.apply('sets', sid, { folder: n, updatedAt: now }); });
   },
 
   // ---------- Écriture : séries ----------
   createSet({ title, folder = '', termLang = '', defLang = '', cards = [] }) {
     const id = uid('s');
+    folder = folder ? this.createFolder(folder) : '';
     const now = Date.now();
     const map = {};
     cards.forEach((c, i) => { map[uid('c')] = { term: c.term, definition: c.definition, order: i, starred: !!c.starred }; });
@@ -122,6 +190,7 @@ export const store = {
     const set = this.getSet(id);
     if (!set) return;
     const patch = { updatedAt: Date.now() };
+    if (folder) folder = this.createFolder(folder);
     for (const [k, v] of Object.entries({ title, folder, termLang, defLang })) if (v !== undefined && v !== set[k]) patch[k] = v;
     if (cards) {
       const existing = set.cards || {};
@@ -202,7 +271,7 @@ export const store = {
 
   // ---------- Sauvegarde / import ----------
   exportAll() {
-    return { app: 'revi', format: 1, version: APP_VERSION, exportedAt: new Date().toISOString(), sets: this.state.sets, progress: this.state.progress };
+    return { app: 'revi', format: 1, version: APP_VERSION, exportedAt: new Date().toISOString(), sets: this.state.sets, progress: this.state.progress, folders: this.state.folders };
   },
   /** Fusionne une sauvegarde : les séries existantes (même id) sont mises à jour, les autres ajoutées. */
   importAll(data) {
@@ -210,11 +279,13 @@ export const store = {
     let n = 0;
     for (const [id, s] of Object.entries(data.sets)) { if (isPlainObject(s)) { this.backend.apply('sets', id, s); n++; } }
     for (const [id, p] of Object.entries(data.progress || {})) { if (isPlainObject(p)) this.backend.apply('progress', id, p); }
+    for (const [id, f] of Object.entries(data.folders || {})) { if (isPlainObject(f) && f.name && !this.getFolder(f.name)) this.backend.apply('folders', id, f); }
     return n;
   },
   /** Copie des données brutes (ex. local -> compte) dans le backend actif. */
   copyInto(data) {
     for (const [id, s] of Object.entries(data.sets || {})) this.backend.apply('sets', id, s);
     for (const [id, p] of Object.entries(data.progress || {})) this.backend.apply('progress', id, p);
+    for (const [id, f] of Object.entries(data.folders || {})) this.backend.apply('folders', id, f);
   },
 };

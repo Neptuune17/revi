@@ -1,5 +1,5 @@
 // Synchronisation via Firebase (Authentication + Cloud Firestore). Chargé uniquement si config.js contient une config.
-// Données : users/{uid}/sets/{setId} et users/{uid}/progress/{setId}.
+// Données : users/{uid}/sets/{setId}, users/{uid}/progress/{setId} et users/{uid}/folders/{folderId}.
 // Firestore garde un cache local (IndexedDB) : l'appli marche hors ligne, les écritures partent au retour du réseau.
 
 import * as fb from '../vendor/firebase.js';
@@ -58,9 +58,9 @@ export class CloudBackend {
     this.kind = 'cloud';
     this.uid = user.uid;
     this.onError = onError || console.error;
-    this.data = { sets: {}, progress: {} };
-    this.meta = { sets: {}, progress: {} };
-    this.loaded = { sets: false, progress: false };
+    this.data = { sets: {}, progress: {}, folders: {} };
+    this.meta = { sets: {}, progress: {}, folders: {} };
+    this.loaded = { sets: false, progress: false, folders: false };
   }
   start(onData) {
     const listen = (coll) => fb.onSnapshot(
@@ -72,16 +72,16 @@ export class CloudBackend {
         this.data = { ...this.data, [coll]: m };
         this.meta[coll] = { pending: snap.metadata.hasPendingWrites, fromCache: snap.metadata.fromCache };
         this.loaded[coll] = true;
-        if (this.loaded.sets && this.loaded.progress) {
+        if (this.loaded.sets && this.loaded.progress && this.loaded.folders) {
           onData(this.data, {
-            pending: this.meta.sets.pending || this.meta.progress.pending,
-            fromCache: this.meta.sets.fromCache || this.meta.progress.fromCache,
+            pending: this.meta.sets.pending || this.meta.progress.pending || this.meta.folders.pending,
+            fromCache: this.meta.sets.fromCache || this.meta.progress.fromCache || this.meta.folders.fromCache,
           });
         }
       },
       (err) => this.onError(err),
     );
-    this.unsubs = [listen('sets'), listen('progress')];
+    this.unsubs = [listen('sets'), listen('progress'), listen('folders')];
   }
   stop() { (this.unsubs || []).forEach((u) => u()); this.unsubs = []; }
   apply(coll, id, patch) {

@@ -13,6 +13,7 @@ import { testView } from './views/test.js';
 import { matchView } from './views/match.js';
 import { settingsView } from './views/settings.js';
 import { gateView, deniedView } from './views/gate.js';
+import { folderView } from './views/folder.js';
 
 const topbar = document.getElementById('topbar');
 const main = document.getElementById('main');
@@ -83,6 +84,7 @@ const routes = [
   [/^\/new$/, editorView],
   [/^\/import$/, editorView, { import: true }],
   [/^\/settings$/, settingsView],
+  [/^\/folder\/(.+)$/, folderView],
   [/^\/set\/([A-Za-z0-9_-]+)$/, setView],
   [/^\/set\/([A-Za-z0-9_-]+)\/edit$/, editorView],
   [/^\/set\/([A-Za-z0-9_-]+)\/cards$/, cardsView],

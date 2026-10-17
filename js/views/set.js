@@ -13,7 +13,6 @@ const STATUS_LABEL = ['Pas vue', 'En cours', 'Maîtrisée'];
 
 export function setView(ctx) {
   const id = ctx.params.id;
-  ctx.setHeader({ back: '/', title: '' });
   let starredOnly = false;
 
   const render = () => {
@@ -24,6 +23,8 @@ export function setView(ctx) {
         h('div', { class: 'actions' }, h('a', { class: 'btn btn-primary', href: '#/' }, 'Revenir à l’accueil'))));
       return;
     }
+    const folderName = (set.folder || '').trim();
+    ctx.setHeader({ back: folderName ? '/folder/' + encodeURIComponent(store.canonicalFolder(folderName)) : '/', title: '' });
     const cards = store.cardsOf(set);
     const statuses = cards.map((c) => store.statusOf(id, c.id));
     const count = [0, 1, 2].map((s) => statuses.filter((x) => x === s).length);
@@ -34,7 +35,7 @@ export function setView(ctx) {
     const head = h('div', { class: 'page-head', style: { alignItems: 'flex-start' } },
       h('div', { class: 'stack', style: { gap: '8px', minWidth: '0', flex: '1' } },
         h('h1', { class: 'set-title' }, set.title || 'Sans titre'),
-        h('div', { class: 'row' }, set.folder ? h('span', { class: 'chip' }, set.folder) : null, h('span', { class: 'muted' }, plural(cards.length, 'carte')))),
+        h('div', { class: 'row' }, folderName ? h('a', { class: 'chip', href: '#/folder/' + encodeURIComponent(store.canonicalFolder(folderName)), title: 'Ouvrir le dossier' }, icon('folder', 16), folderName) : null, h('span', { class: 'muted' }, plural(cards.length, 'carte')))),
       h('div', { class: 'actions' },
         h('a', { class: 'btn', href: `#/set/${id}/edit` }, icon('edit', 20), 'Modifier'),
         menuButton([
