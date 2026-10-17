@@ -1,6 +1,10 @@
 """Vérifie la logique de synchro avec le vrai SDK Firestore, côté appareil (serveur injoignable : on teste le cache local,
 la fusion des patchs, increment() et deleteField(), et la survie des données après rechargement hors ligne)."""
+import os, sys
 from playwright.sync_api import sync_playwright
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _site import make_site, CONFIG_LOCAL
+URL, STOP = make_site(CONFIG_LOCAL)
 JS = """
 async () => {
   const cloud = await import('/js/cloud.js');
@@ -44,7 +48,7 @@ with sync_playwright() as p:
     b = p.chromium.launch()
     ctx = b.new_context(service_workers="block")
     page = ctx.new_page()
-    page.goto("http://localhost:8080/#/"); page.wait_for_timeout(800)
+    page.goto(URL + "#/"); page.wait_for_timeout(800)
     r0 = page.evaluate(JS)
     print("démarrage hors serveur :", r0["first"]["meta"] if r0["first"] else "aucun instantané")
     r = page.evaluate(WRITE)
@@ -61,3 +65,4 @@ with sync_playwright() as p:
     ok = ok and r2["d"]["sets"].get("s1", {}).get("title") == "A"
     print("RÉSULTAT :", "OK" if ok else "ÉCHEC")
     b.close()
+STOP()

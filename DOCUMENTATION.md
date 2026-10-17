@@ -4,7 +4,7 @@ Révi est une appli de fiches de révision (cartes, Apprendre, Test, Associer) q
 
 Ce fichier sert à reprendre le projet plus tard, seul ou avec Claude : il décrit l'architecture, les données, les règles de chaque mode, la mise en ligne et le débogage.
 
-Version documentée : **1.0.0** (17 octobre 2026).
+Version documentée : **1.1.0** (17 octobre 2026).
 
 ---
 
@@ -35,6 +35,7 @@ Après une modification du code, avant de remettre l'appli en ligne : **changer 
   - sans compte : tout est dans le `localStorage` de l'appareil ;
   - avec compte : Cloud Firestore, avec cache hors ligne (IndexedDB). Les modifications faites hors ligne partent au retour du réseau.
 - **Synchronisation optionnelle** : tant que `config.js` contient `firebase: null`, l'appli fonctionne sans compte.
+- **Connexion obligatoire (option)** : avec `requireLogin: true` dans `config.js`, l'appli n'affiche que l'écran de connexion tant qu'on n'est pas connecté (voir 7.1).
 - **Langue de l'interface** : français. Thème clair / sombre / automatique.
 
 ---
@@ -62,7 +63,8 @@ Après une modification du code, avant de remettre l'appli en ligne : **changer 
 | `js/views/learn.js` | Mode Apprendre. |
 | `js/views/test.js` | Mode Test. |
 | `js/views/match.js` | Mode Associer. |
-| `js/views/settings.js` | Réglages : compte, thème, installation, sauvegarde, diagnostic. |
+| `js/views/settings.js` | Réglages : compte, thème, installation, sauvegarde, diagnostic. Exporte aussi `loginForm()`. |
+| `js/views/gate.js` | Écran de connexion obligatoire (`gateView`) et écran « compte refusé » (`deniedView`). |
 | `vendor/firebase.js` | SDK Firebase 13.0.0 (app, auth, firestore) regroupé en un seul fichier. |
 | `fonts/` | Atkinson Hyperlegible Next (texte) et Kalam (annotations « stylo »). Licence SIL OFL. |
 | `icons/` | Icônes de l'appli (générées par `tools/make_icons.py`). |
@@ -89,6 +91,12 @@ Après une modification du code, avant de remettre l'appli en ligne : **changer 
    - filet de sécurité : si aucune source de données n'est choisie au bout de 6 s, le mode local est utilisé.
 4. Enregistre le service worker.
 
+Deux écrans passent avant toutes les routes (`route()` dans `main.js`) :
+- **compte refusé** (`deniedView`) : un compte est connecté mais Firestore refuse ses lectures (`permission-denied`, `state.accessDenied`). L'écran propose de se déconnecter ;
+- **connexion obligatoire** (`gateView`) : `requireLogin` est activé et personne n'est connecté.
+
+Le routeur se relance de lui-même quand l'un de ces deux états change (connexion, déconnexion, refus).
+
 ### 3.2 Routeur
 
 Navigation par le hash de l'adresse (`#/...`), donc aucune configuration serveur n'est nécessaire.
@@ -107,7 +115,7 @@ Chaque vue est une fonction `xxxView(ctx)` qui reçoit :
 
 - `ctx.main` : élément où dessiner ;
 - `ctx.params.id` : identifiant de la série dans l'adresse ;
-- `ctx.setHeader({ title, back, study })` : barre du haut. `study: true` affiche une croix et masque les réglages ;
+- `ctx.setHeader({ title, back, study, gate })` : barre du haut. `study: true` affiche une croix et masque les réglages ; `gate: true` n'affiche que le logo ;
 - `ctx.watch(render)` : appelle `render` maintenant et à chaque changement de données ;
 - `ctx.onCleanup(fn)` : appelée en quittant la vue (enregistrer la session, retirer les écouteurs clavier…) ;
 - `ctx.go(path)` : changer de page.
@@ -193,7 +201,7 @@ Toute écriture est un objet imbriqué, fusionné en profondeur dans le document
 - **Séries** : `createSet({...})` (renvoie l'id), `updateSet(id, {title, folder, termLang, defLang, cards})` (calcule la différence avec l'existant), `toggleStar`, `deleteSet`.
 - **Progression** : `recordAnswer(id, cardId, ok, lvl?)`, `adjustCounts`, `setLevel`, `resetLearn`, `addSession(id, session, existingId?)`, `setBestMatch(id, ms)`.
 - **Sauvegarde** : `exportAll()`, `importAll(data)` (fusion), `copyInto(data)`.
-- **État** : `mode` (`local`/`cloud`), `user`, `pending` (envois en attente), `fromCache`, `online`, `cloudConfigured`, `cloudError`, `ready`.
+- **État** : `mode` (`local`/`cloud`), `user`, `pending` (envois en attente), `fromCache`, `online`, `cloudConfigured`, `cloudError`, `ready`, `requireLogin`, `allowSignup`, `accessDenied`.
 
 ### 4.4 Clés `localStorage`
 
@@ -216,7 +224,9 @@ Toute écriture est un objet imbriqué, fusionné en profondeur dans le document
 
 ---
 
-## 5. Synchronisation : comportement
+## 5. Synchronisation et sécurité
+
+### 5.1 Comportement de la synchronisation
 
 - **Hors ligne** : les écritures sont gardées par Firestore et envoyées au retour du réseau. La pastille en haut indique l'état :
   - « Synchronisé » (vert) ;
@@ -226,6 +236,43 @@ Toute écriture est un objet imbriqué, fusionné en profondeur dans le document
 - **Conflits** : la fusion se fait champ par champ. Sur une même carte modifiée sur deux appareils, la dernière écriture gagne. Les compteurs (`ok`, `ko`) s'additionnent.
 - **Première connexion sur un appareil qui a des séries locales** : l'appli propose de les ajouter au compte. Les données locales sont alors copiées dans le compte, puis sauvegardées dans `revi.data.v1.backup` et retirées du mode local.
 - **Déconnexion** : retour au mode local (vide si les séries ont été envoyées dans le compte). Le cache Firestore reste sur l'appareil.
+
+### 5.2 Sécurité
+
+**Ce qui est public** (dépôt GitHub et site en ligne) : le code, la configuration Firebase de `config.js` et la série d'exemple. La configuration Firebase n'est pas secrète : elle identifie le projet, sans donner accès aux données. Aucune donnée d'utilisateur n'est dans le code. Les commits GitHub sont signés avec l'adresse anonyme `@users.noreply.github.com`.
+
+**Ce qui protège les données** : les règles Firestore. Chaque utilisateur ne lit et n'écrit que sous `users/{son uid}`, et tout le reste est refusé.
+
+**Règles actuellement en place** (dans la console Firebase, pas dans le dépôt) : la base est réservée au compte du propriétaire grâce à la liste d'UID.
+
+```
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid}/{document=**} {
+      allow read, write: if request.auth != null
+                         && request.auth.uid == uid
+                         && uid in ['UID_DU_PROPRIETAIRE'];
+    }
+  }
+}
+```
+
+- L'UID se trouve dans Firebase > Authentication > Utilisateurs.
+- Pour ouvrir l'appli à d'autres personnes, ajouter leurs UID à la liste et mettre `allowSignup: true` dans `config.js`.
+- Un compte connecté mais absent de la liste voit l'écran « Ce compte n'a pas accès à Révi ».
+
+**Audit du 17 octobre 2026**, requêtes envoyées sans compte avec la configuration publique. Toutes ont été refusées (HTTP 403 `PERMISSION_DENIED`) :
+- lister les utilisateurs ;
+- lire les séries ou un document d'un compte ;
+- requêtes groupées sur toutes les séries et progressions ;
+- écrire dans un compte ou ailleurs dans la base.
+
+**Autres points** :
+- le contenu des cartes est toujours affiché comme du texte (pas d'injection de HTML ou de script possible) ;
+- aucun service tiers en dehors de Firebase, aucun pisteur ;
+- la connexion par Google bénéficie de la validation en deux étapes du compte Google ;
+- un inconnu qui se crée un compte ne peut ni lire ni écrire, grâce à la liste d'UID.
 
 ---
 
@@ -325,6 +372,17 @@ Gratuit (offre Spark, sans carte bancaire). Les libellés de la console peuvent 
 6. **Créer la base** : menu Firestore Database, puis « Créer une base de données ». Choisir l'édition standard si on vous le demande, un emplacement en Europe (ex. `eur3` ou `europe-west9` Paris) et le **mode production**.
 7. **Coller les règles** : Firestore Database > onglet Règles. Remplacer tout par le contenu de `firestore.rules`, puis « Publier ».
 8. Remettre l'appli en ligne (section 8). Dans Réglages, se connecter avec le **même compte** sur chaque appareil.
+9. Recommandé : réserver la base à votre compte avec la liste d'UID (section 5.2).
+
+### 7.1 Options de `config.js`
+
+| Option | Valeur | Effet |
+|---|---|---|
+| `firebase` | `null` ou l'objet `firebaseConfig` | `null` : mode local uniquement, sans synchronisation. |
+| `requireLogin` | `true` / `false` (défaut `false`) | `true` : seul l'écran de connexion s'affiche tant qu'on n'est pas connecté. Ignoré si `firebase` vaut `null`. |
+| `allowSignup` | `true` / `false` | Affiche « Créer un compte » (par email). Par défaut : `false` si `requireLogin` est activé, `true` sinon. La connexion Google crée toujours un compte au premier passage : c'est la liste d'UID des règles qui bloque les inconnus. |
+
+Avec `requireLogin`, il faut une connexion internet pour se connecter la première fois sur un appareil. Ensuite, la session est gardée et l'appli fonctionne hors ligne.
 
 ---
 
@@ -396,6 +454,7 @@ npx esbuild tools/firebase-entry.js --bundle --format=esm --minify --target=es20
 | Les séries d'un appareil n'apparaissent pas sur l'autre | Pas le même compte, ou appareil hors ligne | Vérifier l'email dans Réglages et la pastille d'état sur les deux appareils. |
 | « Impossible d'enregistrer sur cet appareil » | Stockage local plein ou bloqué (navigation privée) | Quitter la navigation privée, exporter une sauvegarde, se connecter pour utiliser Firestore. |
 | Une page affiche « Cette page n'a pas pu s'afficher » | Erreur JavaScript dans la vue | Copier le rapport de diagnostic (la pile d'appel y est). |
+| « Ce compte n'a pas accès à Révi » | Compte connecté absent de la liste d'UID, ou règles Firestore incorrectes | Se reconnecter avec le bon compte, ou corriger l'UID dans les règles (section 5.2). |
 
 ### Tests automatisés
 
@@ -409,13 +468,15 @@ Le dossier `tests/` contient des scripts Playwright (Python) :
   - le fonctionnement hors ligne.
 - `cloud_local.py` : vérifie avec le vrai SDK Firestore (sans serveur) la fusion des patchs, `increment`, `deleteField` et le cache après rechargement.
 - `cloud_smoke.py` : démarre l'appli avec une fausse configuration Firebase et vérifie le formulaire de connexion et les messages d'erreur.
+- `gate_smoke.py` : vérifie la connexion obligatoire (toutes les pages bloquées, pas de « Créer un compte »), l'écran « compte refusé » et le message hors ligne.
+- `_site.py` : utilitaire commun. Chaque test sert lui-même une copie de l'appli avec son propre `config.js`, sans jamais toucher au vrai projet Firebase.
 
-Pour les lancer :
+Pour les lancer, depuis le dossier du projet :
 
 ```bash
 pip install playwright && python3 -m playwright install chromium
-cd revi && python3 -m http.server 8080      # dans un terminal
-python3 tests/e2e.py                          # dans un autre
+python3 tests/e2e.py
+python3 tests/gate_smoke.py
 ```
 
 ---
@@ -434,6 +495,12 @@ python3 tests/e2e.py                          # dans un autre
 
 ## 12. Historique des versions
 
+- **1.1.0** (17 octobre 2026) :
+  - option `requireLogin` : écran de connexion obligatoire ;
+  - option `allowSignup` ;
+  - écran « compte refusé » au lieu d'un chargement sans fin quand Firestore refuse un compte ;
+  - section Sécurité dans la documentation ;
+  - tests autonomes (`tests/_site.py`, `tests/gate_smoke.py`).
 - **1.0.0** (17 octobre 2026) : première version.
   - Modes Cartes, Apprendre, Test, Associer.
   - Statistiques et historique.

@@ -1,6 +1,8 @@
 rules_version = '2';
 // Règles de sécurité Firestore pour Révi : chaque utilisateur ne peut lire et écrire que ses propres données.
 // À coller dans la console Firebase > Firestore Database > Règles, puis « Publier ».
+// Recommandé : réserver la base à vos comptes en ajoutant, après la vérification de l'uid :
+//   && uid in ['VOTRE_UID']   (UID visible dans Authentication > Utilisateurs ; voir DOCUMENTATION.md, section 5.2)
 service cloud.firestore {
   match /databases/{database}/documents {
     match /users/{uid}/{document=**} {

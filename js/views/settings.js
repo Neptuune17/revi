@@ -57,7 +57,7 @@ function renderAccount(el) {
     return;
   }
   if (s.cloudError && !cloud) { setChildren(el, statusLine('ko', s.cloudError)); return; }
-  if (!s.user) { setChildren(el, ...loginForm()); return; }
+  if (!s.user) { setChildren(el, statusLine('warn', 'Non connecté'), ...loginForm()); return; }
 
   const state = !s.online ? ['ko', 'Hors ligne : les modifications seront envoyées au retour du réseau.']
     : s.pending ? ['warn', 'Envoi des modifications en cours…'] : ['ok', 'Tout est synchronisé.'];
@@ -71,7 +71,8 @@ function renderAccount(el) {
     } }, 'Se déconnecter')));
 }
 
-function loginForm() {
+/** Formulaire de connexion (Réglages et écran de connexion obligatoire). */
+export function loginForm({ intro = true } = {}) {
   const email = h('input', { class: 'input', type: 'email', autocomplete: 'email', placeholder: 'vous@exemple.fr', 'aria-label': 'Email' });
   const pw = h('input', { class: 'input', type: 'password', autocomplete: 'current-password', placeholder: 'Mot de passe (6 caractères minimum)', 'aria-label': 'Mot de passe' });
   const msg = h('p', { class: 'small', style: { color: 'var(--red)' }, 'aria-live': 'polite' });
@@ -84,8 +85,7 @@ function loginForm() {
   };
   const valid = () => { if (!email.value.trim()) { msg.textContent = 'Entrez votre email.'; email.focus(); return false; } return true; };
   return [
-    statusLine('warn', 'Non connecté'),
-    h('p', { class: 'muted' }, 'Connectez-vous avec le même compte sur votre téléphone et votre ordinateur : vos séries et vos résultats seront synchronisés.'),
+    intro ? h('p', { class: 'muted' }, 'Connectez-vous avec le même compte sur votre téléphone et votre ordinateur : vos séries et vos résultats seront synchronisés.') : null,
     h('button', { class: 'btn btn-lg', onclick: () => busy((c) => c.signInGoogle()) }, 'Continuer avec Google'),
     isIOS() && isStandalone() ? h('p', { class: 'small muted' }, 'Sur iPhone, si la fenêtre Google ne s’ouvre pas depuis l’appli installée, utilisez la connexion par email.') : null,
     h('div', { class: 'divider' }, 'ou avec un email'),
@@ -93,7 +93,7 @@ function loginForm() {
       email, pw, msg,
       h('div', { class: 'row' },
         h('button', { class: 'btn btn-primary', type: 'submit' }, 'Se connecter'),
-        h('button', { class: 'btn', type: 'button', onclick: () => { if (valid()) busy((c) => c.signUpEmail(email.value.trim(), pw.value)); } }, 'Créer un compte'),
+        store.state.allowSignup ? h('button', { class: 'btn', type: 'button', onclick: () => { if (valid()) busy((c) => c.signUpEmail(email.value.trim(), pw.value)); } }, 'Créer un compte') : null,
         h('button', { class: 'btn btn-ghost', type: 'button', onclick: () => { if (valid()) busy(async (c) => { await c.resetPassword(email.value.trim()); toast('Email de réinitialisation envoyé.'); }); } }, 'Mot de passe oublié'))),
   ];
 }

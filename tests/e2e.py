@@ -1,10 +1,13 @@
-"""Test de bout en bout de Révi (mode local) : chaque mode est joué comme un utilisateur, sur mobile puis ordinateur."""
+"""Test de bout en bout de Révi (mode local) : chaque mode est joué comme un utilisateur, sur mobile puis ordinateur.
+Lancement : python3 tests/e2e.py (le script sert lui-même une copie de l'appli)."""
 import sys, re, json
 from playwright.sync_api import sync_playwright, expect
 
 import os, tempfile
 SHOTS = os.environ.get("REVI_SHOTS", os.path.join(tempfile.gettempdir(), "revi-shots")); os.makedirs(SHOTS, exist_ok=True)
-URL = "http://localhost:8080/"
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _site import make_site, CONFIG_LOCAL
+URL, STOP_SITE = make_site(CONFIG_LOCAL)  # appli en mode local (sans Firebase)
 problems = []
 
 def check(cond, msg):
@@ -217,6 +220,7 @@ with sync_playwright() as p:
     run(p, "d", {"width": 1280, "height": 860}, False)
     run(p, "k", {"width": 390, "height": 844}, True, dark=True)
 
+STOP_SITE()
 print("\n=== BILAN ===")
 print("Tout est bon." if not problems else "\n".join(problems))
 sys.exit(1 if problems else 0)

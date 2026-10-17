@@ -54,6 +54,7 @@ export const store = {
   state: {
     sets: {}, progress: {}, ready: false, mode: 'local', user: null,
     pending: false, fromCache: false, online: navigator.onLine, cloudConfigured: false, cloudError: null,
+    requireLogin: false, allowSignup: true, accessDenied: false,
   },
   backend: null,
   listeners: new Set(),

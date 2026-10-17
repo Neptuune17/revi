@@ -1,8 +1,11 @@
 """Vérifie que le mode synchronisé démarre sans erreur avec une configuration Firebase (serveurs injoignables ici)."""
+import os, sys
 from playwright.sync_api import sync_playwright
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from _site import make_site, config_cloud
+URL, STOP = make_site(config_cloud(require_login=False))
 import os, tempfile
 SHOTS = os.environ.get("REVI_SHOTS", os.path.join(tempfile.gettempdir(), "revi-shots")); os.makedirs(SHOTS, exist_ok=True)
-CFG = 'window.REVI_CONFIG = { firebase: { apiKey: "AIzaFakeKeyForTest000000000000000000", authDomain: "revi-test.firebaseapp.com", projectId: "revi-test", appId: "1:123:web:abc" } };'
 errs = []
 with sync_playwright() as p:
     b = p.chromium.launch()
@@ -10,8 +13,7 @@ with sync_playwright() as p:
     page = ctx.new_page()
     page.on("console", lambda m: errs.append(f"{m.type}: {m.text[:200]}") if m.type == "error" else None)
     page.on("pageerror", lambda e: errs.append(f"pageerror: {e}"))
-    page.route("**/config.js", lambda r: r.fulfill(status=200, content_type="application/javascript", body=CFG))
-    page.goto("http://localhost:8080/#/settings"); page.wait_for_timeout(2500)
+    page.goto(URL + "#/settings"); page.wait_for_timeout(2500)
     txt = page.inner_text("main")
     print("formulaire de connexion :", "Continuer avec Google" in txt and "Se connecter" in txt)
     print("badge :", page.locator(".sync").inner_text())
@@ -22,3 +24,4 @@ with sync_playwright() as p:
     print("cloud chargé :", page.evaluate("!!window.revi && window.revi.store.state.cloudConfigured"))
     print("erreurs :", errs or "aucune")
     b.close()
+STOP()

@@ -12,6 +12,7 @@ import { learnView } from './views/learn.js';
 import { testView } from './views/test.js';
 import { matchView } from './views/match.js';
 import { settingsView } from './views/settings.js';
+import { gateView, deniedView } from './views/gate.js';
 
 const topbar = document.getElementById('topbar');
 const main = document.getElementById('main');
@@ -60,7 +61,7 @@ function renderSync() {
 }
 let prevPath = null, curPath = null;
 function renderHeader() {
-  const { title, back, study } = header;
+  const { title, back, study, gate } = header;
   syncEl = null;
   const left = back
     ? h('a', { class: 'icon-btn', href: '#' + back, 'aria-label': study ? 'Quitter' : 'Retour', onclick: (e) => {
@@ -70,8 +71,8 @@ function renderHeader() {
   setChildren(topbar, 
     left,
     back ? h('div', { class: 'title' }, title || '') : null,
-    renderSync(),
-    study ? null : h('a', { class: 'icon-btn', href: '#/settings', 'aria-label': 'Réglages' }, icon('settings')),
+    gate ? null : renderSync(),
+    study || gate ? null : h('a', { class: 'icon-btn', href: '#/settings', 'aria-label': 'Réglages' }, icon('settings')),
   );
 }
 window.addEventListener('scroll', () => topbar.classList.toggle('scrolled', window.scrollY > 4), { passive: true });
@@ -113,10 +114,13 @@ function route() {
     return;
   }
   waitingReady = false;
-  const match = routes.find(([re]) => re.test(path));
+  lastGate = gateKey();
+  // Compte connecté mais refusé par les règles Firestore, ou connexion obligatoire (config.js > requireLogin).
+  const gate = store.state.accessDenied ? deniedView : (store.state.requireLogin && !store.state.user) ? gateView : null;
+  const match = gate ? [null, gate] : routes.find(([re]) => re.test(path));
   if (!match) { go('/', { replace: true }); return; }
   const [re, view, extra] = match;
-  const m = path.match(re);
+  const m = re ? path.match(re) : [];
   const params = { id: m[1], ...(extra || {}) };
   const query = Object.fromEntries(new URLSearchParams(qs || ''));
   clear(main);
@@ -144,8 +148,12 @@ function route() {
 }
 window.addEventListener('hashchange', route);
 
+// Change d'écran quand l'accès change (connexion, déconnexion, accès refusé).
+let lastGate = null;
+const gateKey = () => [store.state.accessDenied, store.state.requireLogin && !store.state.user].join('|');
 store.subscribe(() => {
   if (waitingReady && store.state.ready) route();
+  else if (!waitingReady && store.state.ready && gateKey() !== lastGate) route();
   else if (syncEl) renderSync();
 });
 window.addEventListener('online', () => store.set({ online: true }));
@@ -160,6 +168,9 @@ async function boot() {
   const cfg = window.REVI_CONFIG && window.REVI_CONFIG.firebase;
   const configured = !!(cfg && cfg.apiKey && cfg.projectId);
   store.state.cloudConfigured = configured;
+  // requireLogin : l'appli n'est utilisable qu'une fois connecté (ignoré si Firebase n'est pas configuré).
+  store.state.requireLogin = configured && !!window.REVI_CONFIG.requireLogin;
+  store.state.allowSignup = window.REVI_CONFIG.allowSignup ?? !store.state.requireLogin;
   const lastMode = ls.get('revi.lastMode', 'local');
 
   if (!configured || lastMode !== 'cloud') store.useBackend(new LocalBackend());
@@ -188,16 +199,20 @@ async function onUser(user) {
     if (currentUid === user.uid) return;
     currentUid = user.uid;
     store.state.user = { uid: user.uid, email: user.email || '', name: user.displayName || '' };
+    store.state.accessDenied = false;
+    store.state.cloudError = null;
     ls.set('revi.lastMode', 'cloud');
     store.useBackend(new cloud.CloudBackend(user, (e) => {
       logError(e, 'firestore');
-      store.set({ cloudError: cloud.authMessage(e) });
-      if (e.code === 'permission-denied') toast(cloud.authMessage(e), { kind: 'error', timeout: 8000 });
+      // Les règles Firestore refusent ce compte : on affiche un écran dédié au lieu d'attendre indéfiniment.
+      if (e.code === 'permission-denied') store.set({ accessDenied: true, ready: true, cloudError: cloud.authMessage(e) });
+      else store.set({ cloudError: cloud.authMessage(e) });
     }), { ready: false });
     await maybeMigrate(user);
   } else {
     currentUid = null;
     store.state.user = null;
+    store.state.accessDenied = false;
     ls.set('revi.lastMode', 'local');
     store.useBackend(new LocalBackend());
   }
