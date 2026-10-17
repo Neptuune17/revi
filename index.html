@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="fr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Révi</title>
+  <meta name="description" content="Fiches de révision : cartes, apprendre, test et associer, synchronisées entre vos appareils.">
+  <meta name="theme-color" content="#EBEEF4">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="icons/favicon.svg" type="image/svg+xml">
+  <link rel="icon" href="icons/favicon-32.png" sizes="32x32" type="image/png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Révi">
+  <link rel="preload" href="fonts/atkinson-latin.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="css/app.css">
+  <script>
+    // Applique le thème choisi avant l'affichage (évite un flash clair/sombre).
+    try { var t = JSON.parse(localStorage.getItem('revi.theme') || '"auto"'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}
+  </script>
+  <script src="config.js"></script>
+  <script type="module" src="js/main.js"></script>
+</head>
+<body>
+  <header id="topbar" class="topbar"></header>
+  <main id="main"></main>
+  <noscript><p style="padding:24px">Révi a besoin de JavaScript pour fonctionner.</p></noscript>
+</body>
+</html>
