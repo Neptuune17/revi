@@ -53,13 +53,13 @@ Après une modification du code, avant de remettre l'appli en ligne : **changer 
 | `js/store.js` | Magasin de données central (`store`) et `LocalBackend` (localStorage). Toutes les lectures et écritures passent par lui. |
 | `js/cloud.js` | `CloudBackend` (Firestore) et fonctions de connexion (Google, email). Chargé seulement si Firebase est configuré. |
 | `js/util.js` | Outils : sentinelles `DELETE`/`inc`, fusion profonde, correction des réponses, import de texte, formats français, minuteur, voix, stockage sûr. |
-| `js/ui.js` | Création d'éléments `h()`, `setChildren()`, `add()`, icônes SVG, toasts, dialogues, menus, contrôles segmentés. |
+| `js/ui.js` | Création d'éléments `h()`, `setChildren()`, `add()`, icônes SVG, toasts, dialogues (`confirmDialog`, `promptDialog`, `checklistDialog` avec intertitres, `choiceDialog` à choix unique), menus, contrôles segmentés. |
 | `js/version.js` | `APP_VERSION`. |
 | `js/sample.js` | Série d'exemple (connecteurs logiques en anglais). |
 | `js/views/home.js` | Accueil : boutons des dossiers de premier niveau, séries sans dossier, recherche (séries, cartes et dossiers), écran vide, bouton « Nouveau dossier ». Exporte `deckTile`, `folderTile`, `sortSets`, `newFolder`, `folderPath`, `pickFolder` (fenêtre « choisir un dossier »). |
 | `js/views/folder.js` | Page d'un dossier : fil d'Ariane, sous-dossiers, séries, « Sous-dossier », « Nouvelle série » pré-rangée, « Ranger ici » (séries et dossiers existants), renommer, déplacer, supprimer. |
-| `js/views/set.js` | Page d'une série : modes, progression, résultats (graphiques), liste des cartes, menu (copier, télécharger, réinitialiser, supprimer). |
-| `js/views/editor.js` | Création / modification d'une série et import de texte. |
+| `js/views/set.js` | Page d'une série : chemin du dossier, modes, progression, résultats (graphiques), liste des cartes, menu (copier, télécharger, déplacer dans un dossier, réinitialiser, supprimer). |
+| `js/views/editor.js` | Création / modification d'une série et import de texte. Le champ « Dossier » accepte un chemin (« Allemand / Verbes »). |
 | `js/views/cards.js` | Mode Cartes. |
 | `js/views/learn.js` | Mode Apprendre. |
 | `js/views/test.js` | Mode Test. |
@@ -73,6 +73,7 @@ Après une modification du code, avant de remettre l'appli en ligne : **changer 
 | `tools/firebase-entry.js` | Liste des fonctions Firebase incluses dans `vendor/firebase.js` (pour le reconstruire). |
 | `tools/make_icons.py` | Régénère les icônes PNG (Python + Pillow). |
 | `tests/` | Tests automatisés dans un vrai navigateur (Playwright), voir section 10. |
+| `.gitignore` | Exclut le cache Python des tests (`__pycache__/`). |
 
 ---
 
@@ -170,6 +171,7 @@ Les cartes sont un **dictionnaire** indexé par identifiant, et non une liste : 
 
 ```json
 { "name": "Anglais", "createdAt": 1760710000000, "updatedAt": 1760710000000 }
+{ "name": "Allemand/Verbes", "createdAt": 1760710000000, "updatedAt": 1760710000000 }
 ```
 
 Une série est rangée dans un dossier par son champ texte `folder`, qui contient le **chemin** du dossier, pas son identifiant.
