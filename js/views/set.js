@@ -1,6 +1,7 @@
 // Page d'une série : modes d'étude, progression, statistiques, liste des cartes.
 import { h, setChildren, add, icon, menuButton, confirmDialog, toast } from '../ui.js';
-import { store } from '../store.js';
+import { store, folderKey, displayPath } from '../store.js';
+import { folderPath, pickFolder } from './home.js';
 import { plural, pct, fmtSeconds, fmtDuration, fmtRelative, toExportText, copyText, downloadFile, speak, canSpeak } from '../util.js';
 
 const MODES = [
@@ -23,8 +24,9 @@ export function setView(ctx) {
         h('div', { class: 'actions' }, h('a', { class: 'btn btn-primary', href: '#/' }, 'Revenir à l’accueil'))));
       return;
     }
-    const folderName = (set.folder || '').trim();
-    ctx.setHeader({ back: folderName ? '/folder/' + encodeURIComponent(store.canonicalFolder(folderName)) : '/', title: '' });
+    const folderName = folderKey(set.folder) ? store.canonicalFolder(set.folder) : '';
+    const home = folderName ? folderPath(folderName) : '/';
+    ctx.setHeader({ back: home, title: '' });
     const cards = store.cardsOf(set);
     const statuses = cards.map((c) => store.statusOf(id, c.id));
     const count = [0, 1, 2].map((s) => statuses.filter((x) => x === s).length);
@@ -35,17 +37,23 @@ export function setView(ctx) {
     const head = h('div', { class: 'page-head', style: { alignItems: 'flex-start' } },
       h('div', { class: 'stack', style: { gap: '8px', minWidth: '0', flex: '1' } },
         h('h1', { class: 'set-title' }, set.title || 'Sans titre'),
-        h('div', { class: 'row' }, folderName ? h('a', { class: 'chip', href: '#/folder/' + encodeURIComponent(store.canonicalFolder(folderName)), title: 'Ouvrir le dossier' }, icon('folder', 16), folderName) : null, h('span', { class: 'muted' }, plural(cards.length, 'carte')))),
+        h('div', { class: 'row' }, folderName ? h('a', { class: 'chip', href: '#' + home, title: 'Ouvrir le dossier' }, icon('folder', 16), displayPath(folderName)) : null, h('span', { class: 'muted' }, plural(cards.length, 'carte')))),
       h('div', { class: 'actions' },
         h('a', { class: 'btn', href: `#/set/${id}/edit` }, icon('edit', 20), 'Modifier'),
         menuButton([
           { label: 'Copier la liste (format Quizlet)', icon: 'copy', onclick: async () => { toast((await copyText(toExportText(cards))) ? 'Liste copiée.' : 'Copie impossible sur ce navigateur.'); } },
           { label: 'Télécharger la liste (.txt)', icon: 'download', onclick: () => downloadFile(`${(set.title || 'serie').replace(/[^\p{L}\p{N} _-]/gu, '')}.txt`, toExportText(cards), 'text/plain;charset=utf-8') },
+          { label: 'Déplacer dans un dossier', icon: 'move', onclick: async () => {
+            const dest = await pickFolder({ title: `Déplacer « ${set.title || 'Sans titre'} »`, body: 'Choisissez le dossier où ranger cette série.', current: folderName, rootLabel: 'Sans dossier', rootHint: 'La série apparaîtra directement sur l’accueil' });
+            if (dest === null) return;
+            store.moveSetsToFolder([id], dest);
+            toast(dest ? `Série rangée dans « ${displayPath(dest)} ».` : 'Série retirée de son dossier.');
+          } },
           { label: 'Recommencer l’apprentissage', icon: 'restart', onclick: async () => {
             if (await confirmDialog({ title: 'Recommencer l’apprentissage ?', body: 'Toutes les cartes repasseront en « pas vues » dans le mode Apprendre. L’historique et les records sont conservés.', confirm: 'Recommencer' })) { store.resetLearn(id); toast('Progression remise à zéro.'); }
           } },
           { label: 'Supprimer la série', icon: 'trash', danger: true, onclick: async () => {
-            if (await confirmDialog({ title: 'Supprimer « ' + (set.title || 'Sans titre') + ' » ?', body: 'La série, sa progression et son historique seront supprimés sur tous vos appareils.', confirm: 'Supprimer', danger: true })) { store.deleteSet(id); toast('Série supprimée.'); ctx.go('/', { replace: true }); }
+            if (await confirmDialog({ title: 'Supprimer « ' + (set.title || 'Sans titre') + ' » ?', body: 'La série, sa progression et son historique seront supprimés sur tous vos appareils.', confirm: 'Supprimer', danger: true })) { store.deleteSet(id); toast('Série supprimée.'); ctx.go(home, { replace: true }); }
           } },
         ])));
 

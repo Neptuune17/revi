@@ -4,7 +4,7 @@ Révi est une appli de fiches de révision (cartes, Apprendre, Test, Associer) q
 
 Ce fichier sert à reprendre le projet plus tard, seul ou avec Claude : il décrit l'architecture, les données, les règles de chaque mode, la mise en ligne et le débogage.
 
-Version documentée : **1.2.0** (17 octobre 2026).
+Version documentée : **1.3.0** (18 octobre 2026).
 
 ---
 
@@ -56,8 +56,8 @@ Après une modification du code, avant de remettre l'appli en ligne : **changer 
 | `js/ui.js` | Création d'éléments `h()`, `setChildren()`, `add()`, icônes SVG, toasts, dialogues, menus, contrôles segmentés. |
 | `js/version.js` | `APP_VERSION`. |
 | `js/sample.js` | Série d'exemple (connecteurs logiques en anglais). |
-| `js/views/home.js` | Accueil : boutons des dossiers, séries sans dossier, recherche, écran vide, bouton « Nouveau dossier ». Exporte `deckTile`, `sortSets`, `newFolder`, `folderPath`. |
-| `js/views/folder.js` | Page d'un dossier : ses séries, « Nouvelle série » pré-rangée, « Ajouter des séries » existantes, renommer, supprimer. |
+| `js/views/home.js` | Accueil : boutons des dossiers de premier niveau, séries sans dossier, recherche (séries, cartes et dossiers), écran vide, bouton « Nouveau dossier ». Exporte `deckTile`, `folderTile`, `sortSets`, `newFolder`, `folderPath`, `pickFolder` (fenêtre « choisir un dossier »). |
+| `js/views/folder.js` | Page d'un dossier : fil d'Ariane, sous-dossiers, séries, « Sous-dossier », « Nouvelle série » pré-rangée, « Ranger ici » (séries et dossiers existants), renommer, déplacer, supprimer. |
 | `js/views/set.js` | Page d'une série : modes, progression, résultats (graphiques), liste des cartes, menu (copier, télécharger, réinitialiser, supprimer). |
 | `js/views/editor.js` | Création / modification d'une série et import de texte. |
 | `js/views/cards.js` | Mode Cartes. |
@@ -110,8 +110,8 @@ Navigation par le hash de l'adresse (`#/...`), donc aucune configuration serveur
 | `#/set/<id>` | Page de la série |
 | `#/set/<id>/edit` | Modifier la série |
 | `#/set/<id>/cards`, `/learn`, `/test`, `/match` | Modes d'étude |
-| `#/folder/<nom>` | Page d'un dossier (nom encodé avec `encodeURIComponent`) |
-| `#/new?folder=<nom>` | Nouvelle série pré-rangée dans un dossier |
+| `#/folder/<chemin>` | Page d'un dossier, ex. `#/folder/Allemand/Verbes` (chaque niveau encodé avec `encodeURIComponent`, voir `folderPath()`) |
+| `#/new?folder=<chemin>` | Nouvelle série pré-rangée dans un dossier |
 | `#/settings` | Réglages |
 
 Chaque vue est une fonction `xxxView(ctx)` qui reçoit :
@@ -172,10 +172,16 @@ Les cartes sont un **dictionnaire** indexé par identifiant, et non une liste : 
 { "name": "Anglais", "createdAt": 1760710000000, "updatedAt": 1760710000000 }
 ```
 
-Une série est rangée dans un dossier par son champ texte `folder`, qui contient le **nom** du dossier, pas son identifiant. Les dossiers sont comparés sans tenir compte de la casse ni des espaces autour (`folderKey()`) : « anglais » rejoint « Anglais ». `store.folderList()` fusionne les documents `folders` et les noms cités par les séries. Les séries créées avant la version 1.2.0 apparaissent donc dans leur dossier même s'il n'a pas de document.
+Une série est rangée dans un dossier par son champ texte `folder`, qui contient le **chemin** du dossier, pas son identifiant.
 
-- **Renommer un dossier** : renomme son ou ses documents et met à jour le champ `folder` de chaque série concernée.
-- **Supprimer un dossier** : supprime ses documents et vide le champ `folder` de ses séries. Les séries ne sont jamais supprimées.
+**Sous-dossiers (depuis 1.3.0)** : les niveaux du chemin sont séparés par `/`. `"Allemand/Verbes"` est le dossier Verbes rangé dans le dossier Allemand. Le `name` d'un document `folders` est aussi un chemin complet. Il n'y a pas de champ « parent » : la hiérarchie se lit dans le chemin, ce qui reste compatible avec les données d'avant 1.3.0 (un nom sans `/` est un dossier de premier niveau). Un nom de dossier ne peut donc pas contenir `/`.
+
+- **Comparaison** : sans tenir compte de la casse ni des espaces autour de chaque niveau (`folderKey()`) : « allemand / verbes » rejoint « Allemand/Verbes ». `canonicalFolder()` reprend la casse des dossiers existants.
+- **Arborescence** (`store._folderIndex()`, recalculée seulement quand les séries ou les dossiers changent) : fusionne les documents `folders` et les chemins cités par les séries. Les parents d'un chemin existent aussi, même sans document (« Allemand » pour « Allemand/Verbes »). Les séries d'avant 1.2.0, et celles importées depuis un fichier JSON avec `"folder": "Allemand/Verbes"`, apparaissent donc dans leur dossier même sans document.
+- **Créer** (`createFolder`) : crée un document pour le dossier et pour chacun de ses parents qui n'en a pas, pour qu'ils restent visibles même vides.
+- **Renommer / déplacer** (`renameFolder`, `moveFolder`, `moveFoldersInto`) : réécrit le début du chemin du dossier, de tous ses sous-dossiers et de toutes leurs séries. Refusé si un dossier du même nom existe déjà à la destination, ou si l'on range un dossier dans un de ses propres sous-dossiers.
+- **Supprimer** (`deleteFolder`) : supprime ses documents. Rien d'autre n'est perdu : ses séries et ses sous-dossiers remontent d'un niveau (dans le dossier parent, ou sur l'accueil). Si un sous-dossier remonte à côté d'un dossier du même nom, les deux fusionnent.
+- Toutes ces opérations calculent leurs écritures à partir de l'état du moment, sans relire `store.state` entre deux écritures : avec Firestore, les écritures n'arrivent dans `store.state` qu'au prochain instantané (voir `tests/subfolders_cloud.py`).
 
 Niveaux d'une carte (`lvl`) :
 
@@ -211,9 +217,10 @@ Toute écriture est un objet imbriqué, fusionné en profondeur dans le document
 
 - **Lecture** :
   - `state.sets`, `state.progress` ;
-  - `getSet(id)`, `cardsOf(set)` (liste triée), `progressOf(id)`, `cardProgress(id, cardId)`, `statusOf(id, cardId)`, `sessionsOf(id)` (plus récente d'abord), `lastStudied(id)`, `folders()` (noms), `folderList()`, `getFolder(nom)`, `canonicalFolder(nom)`.
+  - `getSet(id)`, `cardsOf(set)` (liste triée), `progressOf(id)`, `cardProgress(id, cardId)`, `statusOf(id, cardId)`, `sessionsOf(id)` (plus récente d'abord), `lastStudied(id)`, `folders()` (chemins), `folderList()` (tous les dossiers : `{ key, name, label, parent, depth, setIds, children }`), `getFolder(chemin)`, `subfolders(chemin)` (`''` = accueil), `folderSetIds(chemin, deep)`, `canonicalFolder(chemin)`.
+- **Chemins** (fonctions exportées par `store.js`) : `splitPath`, `joinPath`, `folderKey`, `parentPath`, `baseName`, `displayPath` (« Allemand › Verbes »), `inputPath` (« Allemand / Verbes »).
 - **Séries** : `createSet({...})` (renvoie l'id), `updateSet(id, {title, folder, termLang, defLang, cards})` (calcule la différence avec l'existant), `toggleStar`, `deleteSet`. Le dossier indiqué est créé s'il n'existe pas.
-- **Dossiers** : `createFolder(nom)` (renvoie le nom exact), `renameFolder(ancien, nouveau)` (refuse un nom déjà pris), `deleteFolder(nom)`, `moveSetsToFolder(ids, nom)`.
+- **Dossiers** : `createFolder(chemin)` (renvoie le chemin exact), `renameFolder(chemin, nouveauNom)`, `moveFolder(chemin, nouveauChemin)`, `moveFoldersInto(chemins, destination)` (renvoie `{ moved, errors }`), `deleteFolder(chemin)`, `moveSetsToFolder(ids, chemin)`.
 - **Progression** : `recordAnswer(id, cardId, ok, lvl?)`, `adjustCounts`, `setLevel`, `resetLearn`, `addSession(id, session, existingId?)`, `setBestMatch(id, ms)`.
 - **Sauvegarde** : `exportAll()`, `importAll(data)` (fusion), `copyInto(data)`. Les dossiers sont inclus.
 - **État** : `mode` (`local`/`cloud`), `user`, `pending` (envois en attente), `fromCache`, `online`, `cloudConfigured`, `cloudError`, `ready`, `requireLogin`, `allowSignup`, `accessDenied`.
@@ -478,11 +485,13 @@ Le dossier `tests/` contient des scripts Playwright (Python) :
 - `e2e.py` : joue chaque mode sur mobile, ordinateur et en thème sombre, et vérifie :
   - les notes et la progression ;
   - l'import ;
+  - les dossiers et sous-dossiers (créer, ranger, renommer, déplacer, supprimer) ;
   - la persistance ;
   - le service worker ;
   - le fonctionnement hors ligne.
 - `cloud_local.py` : vérifie avec le vrai SDK Firestore (sans serveur) la fusion des patchs, `increment`, `deleteField` et le cache après rechargement.
 - `cloud_smoke.py` : démarre l'appli avec une fausse configuration Firebase et vérifie le formulaire de connexion et les messages d'erreur.
+- `subfolders_cloud.py` : vérifie avec le vrai SDK Firestore (sans serveur) que les opérations sur les sous-dossiers donnent le bon résultat même quand les écritures arrivent en différé.
 - `gate_smoke.py` : vérifie la connexion obligatoire (toutes les pages bloquées, pas de « Créer un compte »), l'écran « compte refusé » et le message hors ligne.
 - `_site.py` : utilitaire commun. Chaque test sert lui-même une copie de l'appli avec son propre `config.js`, sans jamais toucher au vrai projet Firebase.
 
@@ -491,6 +500,7 @@ Pour les lancer, depuis le dossier du projet :
 ```bash
 pip install playwright && python3 -m playwright install chromium
 python3 tests/e2e.py
+python3 tests/subfolders_cloud.py
 python3 tests/gate_smoke.py
 ```
 
@@ -504,12 +514,25 @@ python3 tests/gate_smoke.py
 - **Pas de création automatique de cartes depuis un cours** (nécessiterait un service d'IA externe).
 - **Mode Associer** : pas de version à glisser-déposer (toucher-toucher uniquement), et une seule taille de grille.
 - **Conflits** : sur une même carte modifiée simultanément hors ligne sur deux appareils, la dernière modification gagne.
+- **Dossiers** : pas de glisser-déposer pour ranger (menu « Ranger ici » ou « Déplacer »). Un dossier modifié simultanément hors ligne sur deux appareils (ex. renommé sur l'un, déplacé sur l'autre) peut se retrouver en double : il suffit de déplacer ou supprimer le doublon.
 - La déconnexion ne vide pas le cache Firestore de l'appareil (pensé pour des appareils personnels).
 
 ---
 
 ## 12. Historique des versions
 
+- **1.3.0** (18 octobre 2026) : sous-dossiers.
+  - Un dossier peut contenir des sous-dossiers, sur autant de niveaux que voulu (ex. Allemand > Bases, Allemand > Verbes). L'accueil n'affiche que les dossiers de premier niveau.
+  - Page d'un dossier : bouton « Sous-dossier », section « Sous-dossiers », fil d'Ariane vers les dossiers parents. Le bouton retour remonte d'un niveau.
+  - « Ranger ici » (menu « … » du dossier) : déplace d'un coup des séries et des dossiers existants dans ce dossier, avec leur contenu.
+  - « Déplacer le dossier » : le ranger dans un autre dossier ou le remettre sur l'accueil.
+  - « Déplacer dans un dossier » sur la page d'une série.
+  - Supprimer un dossier fait remonter ses séries et sous-dossiers d'un niveau.
+  - Le bouton d'un dossier compte les séries et la progression de ses sous-dossiers, et une seconde chemise dépasse derrière s'il en contient.
+  - Éditeur : un sous-dossier s'écrit « Allemand / Verbes ». La puce de la série affiche le chemin (« Allemand › Verbes »).
+  - La recherche de l'accueil trouve aussi les dossiers et sous-dossiers.
+  - Fichiers JSON d'import : `"folder": "Allemand/Verbes"` range la série dans un sous-dossier.
+  - Un dossier créé avant 1.3.0 dont le nom contenait « / » (ex. « Histoire/Géo ») s'affiche désormais comme Histoire > Géo.
 - **1.2.0** (17 octobre 2026) : dossiers.
   - Bouton « Nouveau dossier » sur l'accueil : on peut créer un dossier vide.
   - Les dossiers s'affichent en boutons sur l'accueil. Chaque bouton ouvre la page du dossier avec ses séries.

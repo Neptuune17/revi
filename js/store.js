@@ -4,7 +4,8 @@
 //   - CloudBackend (cloud.js) : Firestore avec cache hors ligne, données sous users/{uid}/...
 // Chaque écriture est un "patch" (objet imbriqué) fusionné en profondeur, avec DELETE et inc() comme sentinelles.
 // Collections : "sets" (séries et cartes), "progress" (progression, sessions, records ; clé = id de la série)
-// et "folders" (dossiers, y compris vides). Une série appartient à un dossier par son champ texte `folder` (nom du dossier).
+// et "folders" (dossiers, y compris vides). Une série appartient à un dossier par son champ texte `folder` (chemin du dossier).
+// Sous-dossiers : le chemin sépare les niveaux par « / » (ex. "Allemand/Verbes" = dossier Verbes rangé dans Allemand).
 
 import { DELETE, inc, deepMerge, uid, ls, isPlainObject } from './util.js';
 import { APP_VERSION } from './version.js';
@@ -14,8 +15,23 @@ const MAX_SESSIONS = 60;
 
 const emptyData = () => ({ sets: {}, progress: {}, folders: {} });
 const withFolders = (d) => ({ sets: d.sets || {}, progress: d.progress || {}, folders: d.folders || {} });
-/** Clé de comparaison des noms de dossier (insensible à la casse et aux espaces autour). */
-export const folderKey = (name) => String(name || '').trim().toLocaleLowerCase('fr');
+// ---------- Chemins de dossier ----------
+const MAX_FOLDER_NAME = 60;
+const lower = (s) => s.toLocaleLowerCase('fr');
+/** "Allemand / Verbes " -> ["Allemand", "Verbes"] (espaces nettoyés, niveaux vides ignorés). */
+export const splitPath = (path) => String(path || '').split('/').map((s) => s.trim().replace(/\s+/g, ' ')).filter(Boolean);
+/** Assemble des morceaux de chemin : joinPath("Allemand", "Verbes") -> "Allemand/Verbes". */
+export const joinPath = (...parts) => parts.flatMap(splitPath).join('/');
+/** Clé de comparaison d'un chemin (insensible à la casse et aux espaces autour de chaque niveau). */
+export const folderKey = (path) => lower(splitPath(path).join('/'));
+export const parentPath = (path) => splitPath(path).slice(0, -1).join('/');
+export const baseName = (path) => splitPath(path).pop() || '';
+/** Chemin lisible : "Allemand › Verbes". */
+export const displayPath = (path) => splitPath(path).join(' › ');
+/** Chemin à taper dans un champ : "Allemand / Verbes". */
+export const inputPath = (path) => splitPath(path).join(' / ');
+const inTree = (key, rootKey) => key === rootKey || key.startsWith(rootKey + '/');
+const sortByLabel = (a, b) => a.label.localeCompare(b.label, 'fr', { numeric: true, sensitivity: 'base' });
 
 export class LocalBackend {
   constructor(key = LS_DATA) {
@@ -108,68 +124,155 @@ export const store = {
     return Object.entries(s).map(([id, v]) => ({ id, ...v })).sort((a, b) => (b.at || 0) - (a.at || 0));
   },
   lastStudied(setId) { const s = this.sessionsOf(setId)[0]; return s ? s.at : 0; },
-  /** Noms de tous les dossiers (pour les listes de choix). */
+  /** Chemins de tous les dossiers (pour les listes de choix). */
   folders() { return this.folderList().map((f) => f.name); },
   /**
-   * Tous les dossiers : ceux enregistrés dans "folders" (même vides) et ceux cités par une série.
-   * @returns {{key:string, id:string|null, name:string, setIds:string[]}[]}
+   * Arborescence des dossiers, recalculée seulement quand les séries ou les dossiers changent.
+   * Un dossier existe s'il a un document dans "folders" (même vide) ou si une série y est rangée.
+   * Ses parents existent alors aussi, même sans document (ex. "Allemand" pour "Allemand/Verbes").
+   * Chaque dossier : { key, id, ids, name (chemin complet), label (dernier niveau), parent (clé, '' = accueil),
+   *                    depth, setIds (séries directement dedans), children (sous-dossiers triés) }.
    */
-  folderList() {
+  _folderIndex() {
+    const st = this.state;
+    if (this._fi && this._fi.folders === st.folders && this._fi.sets === st.sets) return this._fi;
     const map = new Map();
-    for (const [id, f] of Object.entries(this.state.folders || {})) {
-      const name = (f.name || '').trim(); const k = folderKey(name);
-      if (name && !map.has(k)) map.set(k, { key: k, id, name, setIds: [] });
-    }
-    for (const [sid, s] of Object.entries(this.state.sets)) {
-      const name = (s.folder || '').trim(); const k = folderKey(name);
-      if (!name) continue;
-      if (!map.has(k)) map.set(k, { key: k, id: null, name, setIds: [] });
-      map.get(k).setIds.push(sid);
-    }
-    return [...map.values()].sort((a, b) => a.name.localeCompare(b.name, 'fr'));
+    const roots = [];
+    const ensure = (path) => {
+      let parent = null;
+      for (const label of splitPath(path)) {
+        const key = (parent ? parent.key + '/' : '') + lower(label);
+        let f = map.get(key);
+        if (!f) {
+          f = { key, id: null, ids: [], name: (parent ? parent.name + '/' : '') + label, label, parent: parent ? parent.key : '', depth: parent ? parent.depth + 1 : 0, setIds: [], children: [] };
+          map.set(key, f);
+          (parent ? parent.children : roots).push(f);
+        }
+        parent = f;
+      }
+      return parent;
+    };
+    // Les parents d'abord, puis les plus anciens : leur casse fait foi.
+    const docs = Object.entries(st.folders || {}).filter(([, d]) => d && splitPath(d.name).length)
+      .sort(([, a], [, b]) => splitPath(a.name).length - splitPath(b.name).length || (a.createdAt || 0) - (b.createdAt || 0));
+    for (const [id, d] of docs) { const f = ensure(d.name); f.ids.push(id); f.id = f.id || id; }
+    for (const [sid, s] of Object.entries(st.sets)) { const f = s && ensure(s.folder); if (f) f.setIds.push(sid); }
+    roots.sort(sortByLabel);
+    for (const f of map.values()) f.children.sort(sortByLabel);
+    const list = [...map.values()].sort((a, b) => a.name.localeCompare(b.name, 'fr', { numeric: true, sensitivity: 'base' }));
+    this._fi = { folders: st.folders, sets: st.sets, map, roots, list };
+    return this._fi;
   },
-  getFolder(name) { const k = folderKey(name); return k ? this.folderList().find((f) => f.key === k) || null : null; },
-  /** Nom exact d'un dossier existant portant ce nom (casse comprise), sinon le nom nettoyé. */
-  canonicalFolder(name) { const n = String(name || '').trim(); return n ? (this.getFolder(n)?.name || n) : ''; },
+  /** Tous les dossiers, sous-dossiers compris, triés par chemin. */
+  folderList() { return this._folderIndex().list; },
+  getFolder(path) { const k = folderKey(path); return k ? this._folderIndex().map.get(k) || null : null; },
+  /** Sous-dossiers directs d'un dossier ('' = dossiers de l'accueil). */
+  subfolders(path = '') { return folderKey(path) ? this.getFolder(path)?.children || [] : this._folderIndex().roots; },
+  /** Séries d'un dossier ; avec deep, aussi celles de ses sous-dossiers. */
+  folderSetIds(path, deep = false) {
+    const f = this.getFolder(path);
+    if (!f) return [];
+    if (!deep) return f.setIds;
+    const out = [];
+    const walk = (x) => { out.push(...x.setIds); x.children.forEach(walk); };
+    walk(f);
+    return out;
+  },
+  /** Chemin avec la casse des dossiers existants (« allemand/verbes » -> « Allemand/Verbes »), sinon le chemin nettoyé. */
+  canonicalFolder(path) {
+    const { map } = this._folderIndex();
+    let key = '';
+    return splitPath(path).map((seg) => {
+      key = (key ? key + '/' : '') + lower(seg);
+      return map.get(key)?.label || seg.slice(0, MAX_FOLDER_NAME);
+    }).join('/');
+  },
 
   // ---------- Écriture : dossiers ----------
-  /** Crée le dossier s'il n'existe pas encore. Renvoie son nom exact. */
-  createFolder(name) {
-    const n = String(name || '').trim().slice(0, 60);
-    if (!n) throw new Error('Donnez un nom au dossier.');
-    const f = this.getFolder(n);
-    if (f && f.id) return f.name;
-    const finalName = f ? f.name : n;
+  /** Crée le dossier (et ses parents) s'il n'existe pas encore. Renvoie son chemin exact. */
+  createFolder(path) {
+    const name = this.canonicalFolder(path);
+    if (!name) throw new Error('Donnez un nom au dossier.');
+    const { map } = this._folderIndex();
+    const segs = splitPath(name);
     const now = Date.now();
-    this.backend.apply('folders', uid('f'), { name: finalName, createdAt: now, updatedAt: now });
-    return finalName;
+    // Un document par niveau qui n'en a pas : le dossier reste visible même vide.
+    segs.forEach((_, i) => {
+      const p = segs.slice(0, i + 1).join('/');
+      if (!map.get(folderKey(p))?.ids.length) this.backend.apply('folders', uid('f'), { name: p, createdAt: now, updatedAt: now });
+    });
+    return name;
   },
-  renameFolder(oldName, newName) {
-    const f = this.getFolder(oldName);
-    const n = String(newName || '').trim().slice(0, 60);
+  /**
+   * Renomme ou déplace un dossier, avec tout ce qu'il contient (sous-dossiers et séries).
+   * newPath = nouveau chemin complet. Renvoie le chemin final.
+   */
+  moveFolder(oldPath, newPath, { taken } = {}) {
+    const f = this.getFolder(oldPath);
     if (!f) throw new Error('Dossier introuvable.');
-    if (!n) throw new Error('Donnez un nom au dossier.');
-    const other = this.getFolder(n);
-    if (other && other.key !== f.key) throw new Error('Un dossier porte déjà ce nom.');
+    const segs = splitPath(newPath).map((s) => s.slice(0, MAX_FOLDER_NAME));
+    if (!segs.length) throw new Error('Donnez un nom au dossier.');
+    const parent = segs.length > 1 ? this.canonicalFolder(segs.slice(0, -1).join('/')) : '';
+    const dest = joinPath(parent, segs[segs.length - 1]);
+    const destKey = folderKey(dest);
+    if (destKey.startsWith(f.key + '/')) throw new Error('Un dossier ne peut pas être rangé dans un de ses sous-dossiers.');
+    const other = this.getFolder(dest);
+    if ((other && other.key !== f.key) || taken?.has(destKey)) throw new Error(`Il y a déjà un dossier « ${segs[segs.length - 1]} » à cet endroit.`);
+    if (dest === f.name) return dest;
     const now = Date.now();
-    // Tous les documents de ce dossier (il peut exister des doublons créés hors ligne sur deux appareils).
-    const docs = Object.entries(this.state.folders || {}).filter(([, d]) => folderKey(d.name) === f.key);
-    if (docs.length) docs.forEach(([id]) => this.backend.apply('folders', id, { name: n, updatedAt: now }));
-    else this.backend.apply('folders', uid('f'), { name: n, createdAt: now, updatedAt: now });
-    f.setIds.forEach((sid) => this.backend.apply('sets', sid, { folder: n, updatedAt: now }));
-    return n;
+    const rebase = (path) => joinPath(dest, splitPath(path).slice(f.depth + 1).join('/'));
+    const docs = Object.entries(this.state.folders || {}).filter(([, d]) => d && inTree(folderKey(d.name), f.key));
+    const sets = Object.entries(this.state.sets).filter(([, s]) => s && s.folder && inTree(folderKey(s.folder), f.key));
+    if (parent) this.createFolder(parent);
+    // Tous les documents concernés (il peut exister des doublons créés hors ligne sur deux appareils).
+    if (!docs.some(([, d]) => folderKey(d.name) === f.key)) this.backend.apply('folders', uid('f'), { name: dest, createdAt: now, updatedAt: now });
+    docs.forEach(([id, d]) => this.backend.apply('folders', id, { name: rebase(d.name), updatedAt: now }));
+    sets.forEach(([sid, s]) => this.backend.apply('sets', sid, { folder: rebase(s.folder), updatedAt: now }));
+    taken?.add(destKey);
+    return dest;
   },
-  /** Supprime le dossier. Ses séries ne sont pas supprimées : elles passent « sans dossier ». */
-  deleteFolder(name) {
-    const f = this.getFolder(name);
+  /** Renomme un dossier sans le déplacer. Renvoie son nouveau chemin. */
+  renameFolder(oldPath, newName) {
+    const n = String(newName || '').trim();
+    if (n.includes('/')) throw new Error('Le nom ne peut pas contenir « / ».');
+    if (!n) throw new Error('Donnez un nom au dossier.');
+    return this.moveFolder(oldPath, joinPath(parentPath(this.getFolder(oldPath)?.name || oldPath), n));
+  },
+  /**
+   * Range des dossiers dans destPath ('' = accueil). Les dossiers déjà contenus dans un autre dossier choisi suivent leur parent.
+   * Renvoie { moved, errors } (errors : messages des dossiers qui n'ont pas pu être déplacés).
+   */
+  moveFoldersInto(paths, destPath) {
+    const dest = destPath ? this.canonicalFolder(destPath) : '';
+    const picked = paths.map((p) => this.getFolder(p)).filter(Boolean);
+    const top = picked.filter((f) => !picked.some((o) => o !== f && f.key.startsWith(o.key + '/')));
+    const taken = new Set();
+    let moved = 0; const errors = [];
+    if (dest && top.length) this.createFolder(dest);
+    for (const f of top) {
+      try { this.moveFolder(f.name, joinPath(dest, f.label), { taken }); moved++; } catch (e) { errors.push(e.message); }
+    }
+    return { moved, errors };
+  },
+  /** Supprime le dossier. Rien n'est perdu : ses séries et ses sous-dossiers remontent d'un niveau. */
+  deleteFolder(path) {
+    const f = this.getFolder(path);
     if (!f) return 0;
+    const parent = f.parent ? this.getFolder(f.parent).name : '';
     const now = Date.now();
-    f.setIds.forEach((sid) => this.backend.apply('sets', sid, { folder: '', updatedAt: now }));
-    Object.entries(this.state.folders || {}).forEach(([id, d]) => { if (folderKey(d.name) === f.key) this.backend.remove('folders', id); });
+    const rebase = (p) => joinPath(parent, splitPath(p).slice(f.depth + 1).join('/'));
+    const docs = Object.entries(this.state.folders || {}).filter(([, d]) => d && inTree(folderKey(d.name), f.key));
+    const sets = Object.entries(this.state.sets).filter(([, s]) => s && s.folder && inTree(folderKey(s.folder), f.key));
+    if (parent) this.createFolder(parent);
+    docs.forEach(([id, d]) => {
+      if (folderKey(d.name) === f.key) this.backend.remove('folders', id);
+      else this.backend.apply('folders', id, { name: rebase(d.name), updatedAt: now });
+    });
+    sets.forEach(([sid, s]) => this.backend.apply('sets', sid, { folder: rebase(s.folder), updatedAt: now }));
     return f.setIds.length;
   },
-  moveSetsToFolder(setIds, name) {
-    const n = name ? this.createFolder(name) : '';
+  moveSetsToFolder(setIds, path) {
+    const n = path ? this.createFolder(path) : '';
     const now = Date.now();
     setIds.forEach((sid) => { if (this.state.sets[sid]) this.backend.apply('sets', sid, { folder: n, updatedAt: now }); });
   },

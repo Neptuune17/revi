@@ -1,6 +1,7 @@
 // Création et modification d'une série, avec import de texte (export Quizlet, tableur...).
 import { h, setChildren, add, icon, toast, confirmDialog, autoGrow } from '../ui.js';
-import { store } from '../store.js';
+import { store, inputPath, joinPath } from '../store.js';
+import { folderPath } from './home.js';
 import { LANGS, detectSeparators, parseImport, plural } from '../util.js';
 
 const TERM_SEPS = [['auto', 'Détection automatique'], ['\t', 'Tabulation'], [',', 'Virgule'], [';', 'Point-virgule'], [' - ', 'Tiret « - »'], [':', 'Deux-points'], ['custom', 'Autre…']];
@@ -11,7 +12,7 @@ export function editorView(ctx) {
   const set = id ? store.getSet(id) : null;
   if (id && !set) { add(ctx.main, h('div', { class: 'empty' }, h('h2', null, 'Série introuvable'), h('div', { class: 'actions' }, h('a', { class: 'btn btn-primary', href: '#/' }, 'Revenir à l’accueil')))); return; }
   const fromFolder = !set && ctx.query.folder ? store.canonicalFolder(ctx.query.folder) : '';
-  const backPath = set ? `/set/${id}` : fromFolder ? '/folder/' + encodeURIComponent(fromFolder) : '/';
+  const backPath = set ? `/set/${id}` : fromFolder ? folderPath(fromFolder) : '/';
   ctx.setHeader({ title: set ? 'Modifier la série' : 'Nouvelle série', back: backPath });
 
   let rows = set ? store.cardsOf(set).map((c) => ({ id: c.id, term: c.term, definition: c.definition }))
@@ -21,15 +22,17 @@ export function editorView(ctx) {
 
   // ---- Informations ----
   const title = h('input', { class: 'input', value: set?.title || '', placeholder: 'Ex. : Connecteurs logiques', maxlength: 120, oninput: markDirty });
-  const folder = h('input', { class: 'input', value: set?.folder || fromFolder, placeholder: 'Aucun (ex. : Anglais)', list: 'folders-list', maxlength: 60, oninput: markDirty });
-  const folders = h('datalist', { id: 'folders-list' }, store.folders().map((f) => h('option', { value: f })));
+  // Un sous-dossier s'écrit avec « / » : « Allemand / Verbes ».
+  const folder = h('input', { class: 'input', value: inputPath(set ? store.canonicalFolder(set.folder) : fromFolder), placeholder: 'Aucun (ex. : Anglais)', list: 'folders-list', maxlength: 200, oninput: markDirty });
+  const folders = h('datalist', { id: 'folders-list' }, store.folders().map((f) => h('option', { value: inputPath(f) })));
   const langSelect = (val) => h('select', { class: 'select', onchange: markDirty }, LANGS.map(([v, l]) => h('option', { value: v, selected: v === (val || '') }, l)));
   const termLang = langSelect(set?.termLang);
   const defLang = langSelect(set?.defLang);
 
   const meta = h('div', { class: 'editor-meta' },
     h('label', { class: 'field' }, h('span', null, 'Titre'), title),
-    h('label', { class: 'field' }, h('span', null, 'Dossier'), folder, folders),
+    h('label', { class: 'field' }, h('span', null, 'Dossier'), folder, folders,
+      h('small', { class: 'small muted' }, 'Pour un sous-dossier, séparez les niveaux par « / » (ex. : Allemand / Verbes).')),
     h('div', { class: 'full' },
       h('div', { class: 'langs' },
         h('label', { class: 'field' }, h('span', null, 'Langue des termes'), termLang),
@@ -137,7 +140,7 @@ export function editorView(ctx) {
       return;
     }
     if (!filled.length) { toast('Ajoutez au moins une carte.'); return; }
-    const data = { title: t, folder: folder.value.trim(), termLang: termLang.value, defLang: defLang.value };
+    const data = { title: t, folder: joinPath(folder.value), termLang: termLang.value, defLang: defLang.value };
     let target = id;
     if (set) store.updateSet(id, { ...data, cards: filled });
     else target = store.createSet({ ...data, cards: filled });

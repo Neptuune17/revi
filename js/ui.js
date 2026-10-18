@@ -67,6 +67,8 @@ const ICONS = {
   restart: '<path d="M4.5 12a7.5 7.5 0 1 0 2.2-5.3"/><path d="M4.5 4v4h4"/>',
   folder: '<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/>',
   folderPlus: '<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5h5"/>',
+  home: '<path d="M4 11.2l8-6.7 8 6.7"/><path d="M6.5 9.5v10h11v-10"/>',
+  folders: '<path d="M2.7 10a1.8 1.8 0 0 1 1.8-1.8h3.3l1.8 1.8h5.6a1.8 1.8 0 0 1 1.8 1.8v6.4a1.8 1.8 0 0 1-1.8 1.8H4.5a1.8 1.8 0 0 1-1.8-1.8z"/><path d="M6.5 7.5V6a1.8 1.8 0 0 1 1.8-1.8h3l1.8 1.8h5.6a1.8 1.8 0 0 1 1.8 1.8v6.7a1.8 1.8 0 0 1-1.8 1.8H17"/>',
   move: '<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M9 13.5h6M12.5 11l2.5 2.5-2.5 2.5"/>',
 };
 export function icon(name, size = 22, extra = {}) {
@@ -139,7 +141,21 @@ export function promptDialog({ title, label, value = '', placeholder = '', confi
   });
 }
 
-/** Liste à cocher. items: [{value, label, hint}]. Renvoie les valeurs cochées, ou null si annulé. */
+/** Ligne d'une liste à cocher ou à choix unique, avec une icône facultative. */
+const choiceRow = (it, input) => h('label', { class: 'check' + (it.disabled ? ' disabled' : '') }, input,
+  it.icon ? icon(it.icon, 20) : null,
+  h('span', null, it.label, it.hint ? h('span', { class: 'small muted', style: { display: 'block' } }, it.hint) : null));
+/** Insère un intertitre à chaque changement de groupe (it.group). */
+function grouped(rows) {
+  let last;
+  return rows.flatMap(({ it, el }) => {
+    const head = it.group && it.group !== last ? h('div', { class: 'checklist-group' }, it.group) : null;
+    last = it.group;
+    return head ? [head, el] : [el];
+  });
+}
+
+/** Liste à cocher. items: [{value, label, hint, icon, group}]. Renvoie les valeurs cochées, ou null si annulé. */
 export function checklistDialog({ title, body, items, confirm = 'Valider', empty = 'Rien à afficher.' }) {
   return new Promise((resolve) => {
     const d = h('dialog', { class: 'modal' });
@@ -151,9 +167,37 @@ export function checklistDialog({ title, body, items, confirm = 'Valider', empty
     d.append(h('form', { method: 'dialog', class: 'inner', onsubmit: (e) => { e.preventDefault(); done(boxes.filter((b) => b.box.checked).map((b) => b.it.value)); } },
       h('h2', null, title),
       body ? h('p', { class: 'muted' }, body) : null,
-      items.length ? h('div', { class: 'checklist' }, boxes.map(({ it, box }) =>
-        h('label', { class: 'check' }, box, h('span', null, it.label, it.hint ? h('span', { class: 'small muted', style: { display: 'block' } }, it.hint) : null))))
+      items.length ? h('div', { class: 'checklist' }, grouped(boxes.map(({ it, box }) => ({ it, el: choiceRow(it, box) }))))
         : h('p', { class: 'muted' }, empty),
+      h('div', { class: 'btns' },
+        h('button', { type: 'button', class: 'btn btn-ghost', onclick: () => done(null) }, 'Annuler'),
+        submit)));
+    d.addEventListener('cancel', (e) => { e.preventDefault(); done(null); });
+    document.body.append(d);
+    d.showModal();
+  });
+}
+
+/**
+ * Choix unique dans une liste (boutons radio). items: [{value, label, hint, icon, disabled}].
+ * Renvoie la valeur choisie (qui peut être une chaîne vide), ou null si annulé.
+ */
+export function choiceDialog({ title, body, items, confirm = 'Valider' }) {
+  return new Promise((resolve) => {
+    const d = h('dialog', { class: 'modal' });
+    const name = 'choice-' + Math.random().toString(36).slice(2, 8);
+    const radios = items.map((it) => ({ it, radio: h('input', { type: 'radio', name, value: it.value, disabled: !!it.disabled }) }));
+    const done = (v) => { d.close(); d.remove(); resolve(v); };
+    const submit = h('button', { type: 'submit', class: 'btn btn-primary', disabled: true }, confirm);
+    radios.forEach((r) => r.radio.addEventListener('change', () => { submit.disabled = false; }));
+    d.append(h('form', { method: 'dialog', class: 'inner', onsubmit: (e) => {
+      e.preventDefault();
+      const picked = radios.find((r) => r.radio.checked);
+      if (picked) done(picked.it.value);
+    } },
+      h('h2', null, title),
+      body ? h('p', { class: 'muted' }, body) : null,
+      h('div', { class: 'checklist', role: 'radiogroup', 'aria-label': title }, radios.map(({ it, radio }) => choiceRow(it, radio))),
       h('div', { class: 'btns' },
         h('button', { type: 'button', class: 'btn btn-ghost', onclick: () => done(null) }, 'Annuler'),
         submit)));

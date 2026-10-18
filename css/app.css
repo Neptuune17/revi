@@ -227,16 +227,40 @@ textarea.input { resize: vertical; line-height: 1.45; }
   content: ""; position: absolute; left: -1px; top: -13px; width: 46%; height: 15px;
   background: inherit; border: inherit; border-bottom: 0; border-radius: 8px 12px 0 0;
 }
-.folder-tile:hover { transform: translateY(-2px); box-shadow: var(--shadow-lift); }
+.folder-tile { --stack: 0 0 0 0 transparent; box-shadow: var(--stack); }
+.folder-tile:hover { transform: translateY(-2px); box-shadow: var(--stack), var(--shadow-lift); }
+/* Dossier qui contient des sous-dossiers : une seconde chemise dépasse derrière */
+.folder-tile.has-sub {
+  --stack: 5px 5px 0 -1px color-mix(in srgb, var(--pen-soft) 78%, var(--desk)), 5px 5px 0 0 color-mix(in srgb, var(--pen) 24%, transparent);
+}
 .folder-tile svg { color: var(--pen); margin-bottom: 2px; }
 .folder-tile b { font-size: 1.04rem; line-height: 1.25; overflow-wrap: anywhere; }
 .folder-tile .meta { font-size: .85rem; color: var(--ink-2); }
+.folder-tile .meta.path { font-size: .78rem; color: var(--ink-3); overflow-wrap: anywhere; }
 .folder-tile .foot { margin-top: auto; padding-top: 8px; display: flex; flex-direction: column; gap: 5px; }
 .folder-tile .hlbar { background: color-mix(in srgb, var(--paper) 70%, transparent); }
+/* En-tête d'un dossier : sur téléphone, le menu « … » en haut à droite et les boutons dessous ; sur grand écran, tout sur une ligne */
+.folder-head { display: grid; grid-template-columns: minmax(0, 1fr) auto; grid-template-areas: "info menu" "acts acts"; align-items: start; gap: 12px 8px; }
+.folder-head > .stack { grid-area: info; }
+.folder-head > .actions { grid-area: acts; }
+.folder-head > .menu-wrap { grid-area: menu; }
+@media (min-width: 640px) {
+  .folder-head { grid-template-columns: minmax(0, 1fr) auto auto; grid-template-areas: "info acts menu"; }
+}
+/* Fil d'Ariane d'un dossier : Allemand › Verbes */
+.crumbs { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; color: var(--pen); font-size: .875rem; font-weight: 650; min-width: 0; }
+.crumbs a { color: var(--pen); text-decoration: none; padding: 2px 0; overflow-wrap: anywhere; }
+.crumbs a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.crumbs .sep { color: var(--ink-3); font-weight: 400; }
 .checklist { display: grid; gap: 2px; max-height: 50vh; overflow-y: auto; margin: 0 -4px; padding: 0 4px; }
 .checklist .check { align-items: flex-start; padding: 8px 0; border-top: 1px solid var(--line); }
-.checklist .check:first-child { border-top: 0; }
+.checklist .check:first-child, .checklist-group + .check { border-top: 0; }
 .checklist .check input { margin-top: 2px; }
+.checklist .check > svg { color: var(--pen); flex: none; margin-top: 1px; }
+.checklist .check.disabled { cursor: default; color: var(--ink-3); }
+.checklist .check.disabled > svg { color: var(--ink-3); }
+.checklist-group { font-size: .8rem; font-weight: 700; letter-spacing: .02em; color: var(--ink-2); padding: 12px 0 2px; border-top: 1px solid var(--line); }
+.checklist-group:first-child { padding-top: 0; border-top: 0; }
 a.chip { text-decoration: none; gap: 6px; }
 a.chip:hover { background: color-mix(in srgb, var(--pen-soft) 70%, var(--pen) 30%); }
 .decks { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 18px 16px; }
