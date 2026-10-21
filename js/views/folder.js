@@ -3,11 +3,12 @@
 import { h, setChildren, icon, toast, menuButton, confirmDialog, promptDialog, checklistDialog } from '../ui.js';
 import { store, joinPath, parentPath, displayPath } from '../store.js';
 import { plural } from '../util.js';
-import { deckTile, folderTile, sortSets, folderPath, newFolder, pickFolder } from './home.js';
+import { deckTile, folderTile, sortSets, sortFolders, sortControl, folderPath, newFolder, pickFolder } from './home.js';
 
 export function folderView(ctx) {
   let name = ctx.params.id;
   try { name = decodeURIComponent(name); } catch { /* nom déjà décodé */ }
+  const sorter = h('div', { class: 'sort-row' }, sortControl(() => render()));
 
   const render = () => {
     const f = store.getFolder(name);
@@ -24,7 +25,7 @@ export function folderView(ctx) {
     const parent = ancestors[ancestors.length - 1] || null;
     ctx.setHeader({ back: parent ? folderPath(parent.name) : '/', title: '' });
 
-    const subs = f.children;
+    const subs = sortFolders(f.children);
     const sets = sortSets(f.setIds.map((id) => [id, store.getSet(id)]).filter(([, s]) => s));
     const newSetHref = '#/new?folder=' + encodeURIComponent(f.name);
     // Ce qu'on peut ranger ici : les séries d'ailleurs, et les dossiers qui ne sont ni celui-ci, ni un de ses parents, ni déjà dedans.
@@ -102,7 +103,7 @@ export function folderView(ctx) {
         ? ancestors.map((a, i) => [i ? h('span', { class: 'sep', 'aria-hidden': 'true' }, '›') : null, h('a', { href: '#' + folderPath(a.name) }, a.label)])
         : h('span', null, 'Dossier'));
     const summary = [subs.length ? plural(subs.length, 'sous-dossier') : null, sets.length ? plural(sets.length, 'série') : null].filter(Boolean).join(', ') || 'Dossier vide';
-    const decks = h('div', { class: 'decks', style: subs.length ? null : { marginTop: '8px' } }, sets.map(([id, s]) => deckTile(id, s)));
+    const decks = h('div', { class: 'decks', style: subs.length ? null : { marginTop: subs.length + sets.length >= 2 ? '26px' : '8px' } }, sets.map(([id, s]) => deckTile(id, s)));
 
     setChildren(ctx.main,
       h('div', { class: 'page-head folder-head' },
@@ -119,6 +120,7 @@ export function folderView(ctx) {
           { label: 'Déplacer le dossier', icon: 'folders', onclick: move },
           { label: 'Supprimer le dossier', icon: 'trash', danger: true, onclick: remove },
         ])),
+      subs.length + sets.length >= 2 ? sorter : null,
       subs.length ? h('section', { class: 'shelf' }, h('h2', null, 'Sous-dossiers'), h('div', { class: 'folders' }, subs.map((s) => folderTile(s)))) : null,
       sets.length ? (subs.length ? h('section', { class: 'shelf' }, h('h2', null, 'Séries'), decks) : decks) : null,
       !subs.length && !sets.length ? h('div', { class: 'empty' },

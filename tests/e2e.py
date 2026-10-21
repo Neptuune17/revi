@@ -25,6 +25,164 @@ def answer_for(cards, prompt):
         if c["definition"].strip() == prompt.strip(): return c["term"]
     return None
 
+def match_geometry(page):
+    """Mesures de la grille d'Associer : défilement, bords, colonnes, débordement du texte."""
+    return page.evaluate("""() => {
+      const g = document.querySelector('.tiles').getBoundingClientRect();
+      const tiles = [...document.querySelectorAll('.tile')];
+      return { n: tiles.length, vh: innerHeight, vw: document.documentElement.clientWidth, scroll: document.scrollingElement.scrollHeight,
+        top: g.top, bottom: Math.round(g.bottom), left: g.left, right: g.right, width: Math.round(g.width),
+        cols: new Set(tiles.map(t => Math.round(t.getBoundingClientRect().left))).size,
+        heights: tiles.map(t => Math.round(t.getBoundingClientRect().height)),
+        overflow: tiles.some(t => { const s = t.firstElementChild; return s.offsetHeight > t.clientHeight + 1 || s.scrollWidth > t.clientWidth + 1; }) };
+    }""")
+
+def tile_rects(page):
+    return page.evaluate("""() => [...document.querySelectorAll('.tile:not(.gone)')].map(t => { const r = t.getBoundingClientRect(); return [t.textContent, Math.round(r.x), Math.round(r.y), Math.round(r.width), Math.round(r.height)]; })""")
+
+def new_page(p, viewport={"width": 390, "height": 844}, mobile=True, init_script=None):
+    b = p.chromium.launch()
+    ctx = b.new_context(viewport=viewport, device_scale_factor=2 if mobile else 1, is_mobile=mobile, has_touch=mobile, locale="fr-FR")
+    if init_script: ctx.add_init_script(init_script)
+    page = ctx.new_page()
+    errors = []
+    page.on("console", lambda m: errors.append(f"console.{m.type}: {m.text}") if m.type == "error" else None)
+    page.on("pageerror", lambda e: errors.append(f"pageerror: {e}"))
+    page.goto(URL); page.wait_for_timeout(600)
+    return b, page, errors
+
+def grade_checks(p):
+    """Correction stricte (idée 4) : la fonction grade testée dans le navigateur, mêmes règles pour Apprendre et Test."""
+    b, page, errors = new_page(p)
+    cases = [
+        ["wöllen", "sollen", False], ["sollen", "sollen (soll – sollte – hat gesollt)", True],
+        ["Sollen", "sollen (soll – sollte – hat gesollt)", True], ["sollen (soll – sollte – hat gesollt)", "sollen (soll – sollte – hat gesollt)", True],
+        ["etre", "être", False], ["schoen", "schön", False], ["schon", "schön", False], ["Strasse", "Straße", False],
+        ["devoir", "devoir (conseil, ordre d'autrui) ; être censé", True], ["être censé", "devoir (conseil, ordre d'autrui) ; être censé", True],
+        ["ordre d'autrui", "devoir (conseil, ordre d'autrui) ; être censé", False], ["besides", "besides, moreover", True],
+        ["thus.", "thus", True], ["peut être", "peut-être", True],
+    ]
+    res = page.evaluate("""async (cases) => {
+      const u = await import('./js/util.js');
+      return cases.map(([inp, exp]) => { const g = u.grade(inp, exp); return [g.ok, g.kind, !!g.diff]; });
+    }""", cases)
+    for (inp, exp, want), (ok, kind, has_diff) in zip(cases, res):
+        check(ok == want, f"[grade] « {inp} » pour « {exp} » : {'accepté' if want else 'refusé'} ({kind})")
+    diff = page.evaluate("""async () => { const u = await import('./js/util.js');
+      const d = u.grade('wöllen', 'sollen').diff; const far = u.grade("n'importe quoi", 'sollen').diff;
+      return { bad: d.yours.filter(s => s.k === 'bad').map(s => s.t).join(''), fix: d.expected.filter(s => s.k === 'fix').map(s => s.t).join(''), far }; }""")
+    check(diff["bad"] == "wö" and diff["fix"] == "so" and diff["far"] is None, f"[grade] lettres erronées repérées (« wö » au lieu de « so »), rien pour une réponse sans rapport ({diff})")
+    check(not errors, "[grade] aucune erreur JavaScript" + ("" if not errors else ": " + " | ".join(errors[:5])))
+    b.close()
+
+FAKE_SPEECH = """
+window.__spoken = []; window.__cancels = 0;
+const fakeSpeech = { speak(u) { window.__spoken.push({ text: u.text, lang: u.lang }); }, cancel() { window.__cancels++; },
+  getVoices() { return []; }, speaking: false, pending: false, paused: false, addEventListener() {}, removeEventListener() {} };
+Object.defineProperty(window, 'speechSynthesis', { configurable: true, get: () => fakeSpeech });
+if (!window.SpeechSynthesisUtterance) window.SpeechSynthesisUtterance = class { constructor(t) { this.text = t; } };
+"""
+
+def voice_checks(p):
+    """Lecture automatique du mode Cartes (idée 2), avec une fausse synthèse vocale qui enregistre les appels."""
+    b, page, errors = new_page(p, init_script=FAKE_SPEECH)
+    sid = page.evaluate("""() => revi.store.createSet({ title: 'Voix', termLang: 'de-DE', defLang: 'fr-FR',
+      cards: [{ term: 'sein', definition: 'être (verbe)' }, { term: 'haben', definition: 'avoir' }] })""")
+    spoken = lambda: page.evaluate("window.__spoken.filter(s => s.text.trim()).map(s => [s.text.trim(), s.lang])")
+    reset = lambda: page.evaluate("window.__spoken = []; window.__cancels = 0")
+    page.goto(URL + f"#/set/{sid}/cards"); page.wait_for_timeout(500)
+    check(spoken()[-1:] == [["sein", "de-DE"]], f"[voix] la carte qui arrive est lue dans la langue du terme ({spoken()})")
+    reset(); page.locator(".flip").click(); page.wait_for_timeout(900)
+    check(spoken() == [["être", "fr-FR"]], f"[voix] retourner lit une seule fois le verso, en français, sans les parenthèses ({spoken()})")
+    reset(); page.keyboard.press("Space"); page.wait_for_timeout(80); page.keyboard.press("Space"); page.wait_for_timeout(900)
+    cancels = page.evaluate("window.__cancels")
+    check(spoken() == [["être", "fr-FR"]] and cancels >= 2, f"[voix] retournements rapides : la lecture précédente est coupée, seule la face finale est lue ({spoken()}, {cancels} coupures)")
+    reset(); page.get_by_role("button", name="Je sais").click(); page.wait_for_timeout(500)
+    check(spoken() == [["haben", "de-DE"]], f"[voix] la carte suivante est lue à son arrivée ({spoken()})")
+    page.locator("details.options summary").click(); page.wait_for_timeout(150)
+    auto = page.locator("label.check", has_text="Lecture automatique").locator("input")
+    check(auto.is_checked(), "[voix] option « Lecture automatique » activée par défaut")
+    auto.uncheck(); page.wait_for_timeout(150)
+    reset(); page.locator(".flip").click(); page.wait_for_timeout(900)
+    check(spoken() == [], f"[voix] option désactivée : aucune lecture automatique ({spoken()})")
+    page.locator(".flip .face.back .icon-btn[aria-label='Écouter']").click(); page.wait_for_timeout(200)
+    check(spoken() == [["avoir", "fr-FR"]], f"[voix] option désactivée : le haut-parleur fonctionne toujours ({spoken()})")
+    page.reload(); page.wait_for_timeout(600)
+    page.locator("details.options summary").click(); page.wait_for_timeout(150)
+    auto = page.locator("label.check", has_text="Lecture automatique").locator("input")
+    check(not auto.is_checked(), "[voix] le choix « Lecture automatique » est mémorisé")
+    auto.check(); page.wait_for_timeout(150)
+    reset(); page.get_by_role("button", name="Définition").click(); page.wait_for_timeout(500)
+    check(spoken()[-1:] == [["être", "fr-FR"]], f"[voix] face visible « Définition » : la lecture suit la face affichée ({spoken()})")
+    # Série sans langue : option grisée, rien n'est lu
+    sid2 = page.evaluate("() => revi.store.createSet({ title: 'Muette', cards: [{ term: 'a', definition: 'b' }] })")
+    reset(); page.goto(URL + f"#/set/{sid2}/cards"); page.wait_for_timeout(400)
+    page.locator(".flip").click(); page.wait_for_timeout(800)
+    page.locator("details.options summary").click(); page.wait_for_timeout(150)
+    check(spoken() == [] and page.locator("label.check.disabled", has_text="Lecture automatique").count() == 1, "[voix] série sans langue : rien n'est lu et l'option est grisée")
+    page.screenshot(path=f"{SHOTS}/v-cards-options.png", full_page=True)
+    check(not errors, "[voix] aucune erreur JavaScript" + ("" if not errors else ": " + " | ".join(errors[:5])))
+    b.close()
+
+def small_match_checks(p):
+    """Associer avec peu de cartes (idée 3) : tuiles plafonnées, pas de défilement."""
+    b, page, errors = new_page(p)
+    sid = page.evaluate("""() => revi.store.createSet({ title: 'Trois', cards: [{ term: 'un', definition: 'one' }, { term: 'deux', definition: 'two' }, { term: 'trois', definition: 'three' }] })""")
+    page.goto(URL + f"#/set/{sid}/match"); page.wait_for_timeout(300)
+    page.get_by_role("button", name="Commencer").click(); page.wait_for_timeout(400)
+    g = match_geometry(page)
+    check(g["n"] == 6 and g["scroll"] <= g["vh"] + 1 and max(g["heights"]) <= 180, f"[associer] 6 tuiles : pas de défilement, tuiles plafonnées ({max(g['heights'])} px)")
+    page.screenshot(path=f"{SHOTS}/v-match-6.png")
+    check(not errors, "[associer] aucune erreur JavaScript" + ("" if not errors else ": " + " | ".join(errors[:5])))
+    b.close()
+
+def sort_checks(p, viewport, mobile):
+    """Tri des dossiers et des séries (idée 1), avec des dates de création maîtrisées."""
+    b, page, errors = new_page(p, viewport=viewport, mobile=mobile)
+    page.evaluate("""() => {
+      const s = revi.store, day = 86400000, t0 = Date.now() - 20 * day;
+      const docId = (name) => Object.entries(s.state.folders).find(([, d]) => d.name === name)[0];
+      const folder = (name, d) => { s.createFolder(name); s.backend.apply('folders', docId(name), { createdAt: t0 + d * day }); };
+      const set = (title, folder, d) => { const id = s.createSet({ title, folder, cards: [{ term: 'a', definition: 'b' }] }); s.backend.apply('sets', id, { createdAt: t0 + d * day, updatedAt: t0 + d * day }); return id; };
+      folder('Leçon 10', 1); folder('Été', 2); folder('Leçon 2', 3);
+      folder('Leçon 2/B', 8); folder('Leçon 2/A', 7);
+      const ete = set('Plage', 'Été', 2.5);
+      s.addSession(ete, { mode: 'cards', ok: 1, ko: 0, total: 1, dur: 1000, at: Date.now() - day });
+      // Dossier sans document (créé seulement par le chemin d'une série) : sa date est celle de son contenu
+      s.backend.apply('sets', 'szoo', { title: 'Lion', folder: 'Zoo', cards: {}, createdAt: t0, updatedAt: t0 });
+      set('Série 10', '', 5); set('Série 2', '', 6);
+      const abricot = set('abricot', '', 4);
+      s.addSession(abricot, { mode: 'cards', ok: 1, ko: 0, total: 1, dur: 1000, at: t0 + 5.5 * day });
+    }""")
+    page.goto(URL + "#/"); page.wait_for_timeout(400)
+    order = lambda: (page.locator(".folder-tile b").all_inner_texts(), page.locator(".deck h3").all_inner_texts())
+    check(page.locator(".sort-select").input_value() == "studied", "[tri] réglage par défaut : dernière révision")
+    check(order() == (["Été", "Leçon 2", "Leçon 10", "Zoo"], ["Série 2", "abricot", "Série 10"]), f"[tri] dernière révision ({order()})")
+    page.screenshot(path=f"{SHOTS}/v-sort-home.png", full_page=True)
+    expected = {
+        "name": (["Été", "Leçon 2", "Leçon 10", "Zoo"], ["abricot", "Série 2", "Série 10"]),
+        "newest": (["Leçon 2", "Été", "Leçon 10", "Zoo"], ["Série 2", "Série 10", "abricot"]),
+        "oldest": (["Zoo", "Leçon 10", "Été", "Leçon 2"], ["abricot", "Série 10", "Série 2"]),
+    }
+    for mode, want in expected.items():
+        page.select_option(".sort-select", mode); page.wait_for_timeout(200)
+        check(order() == want, f"[tri] accueil, {mode} ({order()})")
+    page.goto(URL + "#/folder/Le%C3%A7on%202"); page.wait_for_timeout(300)
+    check(page.locator(".sort-select").input_value() == "oldest" and page.locator(".folder-tile b").all_inner_texts() == ["A", "B"], f"[tri] même réglage dans un dossier : sous-dossiers du plus ancien au plus récent ({page.locator('.folder-tile b').all_inner_texts()})")
+    page.select_option(".sort-select", "newest"); page.wait_for_timeout(200)
+    check(page.locator(".folder-tile b").all_inner_texts() == ["B", "A"], "[tri] sous-dossiers, plus récents d'abord")
+    page.reload(); page.wait_for_timeout(600)
+    check(page.locator(".sort-select").input_value() == "newest" and page.locator(".folder-tile b").all_inner_texts() == ["B", "A"], "[tri] le choix est conservé après rechargement")
+    # Renommer ou déplacer un dossier garde sa date de création, y compris un dossier sans document
+    page.evaluate("() => { revi.store.renameFolder('Leçon 10', 'Leçon 1'); revi.store.renameFolder('Zoo', 'Zoo 2'); }")
+    page.goto(URL + "#/"); page.wait_for_timeout(300)
+    page.select_option(".sort-select", "oldest"); page.wait_for_timeout(200)
+    check(order()[0] == ["Zoo 2", "Leçon 1", "Été", "Leçon 2"], f"[tri] un dossier renommé garde sa place dans le tri par date ({order()[0]})")
+    created = page.evaluate("""() => { const r = revi.store.importAll({ sets: { simp: { title: 'Importée', cards: {} } } }); return revi.store.getSet('simp').createdAt; }""")
+    check(isinstance(created, (int, float)) and created > 0, f"[tri] une série importée sans date reçoit une date de création ({created})")
+    check(not errors, "[tri] aucune erreur JavaScript" + ("" if not errors else ": " + " | ".join(errors[:5])))
+    b.close()
+
 def run(p, label, viewport, mobile, dark=False):
     errors = []
     b = p.chromium.launch()
@@ -89,10 +247,10 @@ def run(p, label, viewport, mobile, dark=False):
                 typed = ans[:k] + ans[k + 1:]  # une lettre oubliée au milieu
                 inp.fill(typed); inp.press("Enter"); page.wait_for_timeout(200)
                 shot("23-learn-typo"); typo_done = True
-                check(page.locator(".feedback.ok").count() == 1, f"[{label}] une petite faute est acceptée ({typed!r})")
-                if page.get_by_role("button", name="Continuer").count():
-                    page.get_by_role("button", name="Continuer").click()
-                page.wait_for_timeout(1200); continue
+                check(page.locator(".feedback.ko").count() == 1, f"[{label}] correction stricte : une lettre oubliée est refusée ({typed!r})")
+                check(page.locator(".feedback .d-miss").count() >= 1 and page.locator(".feedback .d-fix").count() >= 1, f"[{label}] la lettre manquante est signalée en couleur")
+                page.get_by_role("button", name="En fait, j’avais juste").click()
+                page.wait_for_timeout(300); continue
             inp.fill(ans); inp.press("Enter"); page.wait_for_timeout(1250)
     check(page.get_by_text("Tout est maîtrisé").count() == 1, f"[{label}] Apprendre jusqu'à maîtriser toute la série ({step} étapes)")
     shot("25-learn-done")
@@ -142,7 +300,23 @@ def run(p, label, viewport, mobile, dark=False):
     shot("40-match-start")
     for rnd in range(2):
         page.get_by_role("button", name=re.compile("Commencer|Rejouer")).click(); page.wait_for_timeout(300)
-        if rnd == 0: shot("41-match-grid")
+        if rnd == 0:
+            shot("41-match-grid")
+            g = match_geometry(page)
+            check(g["n"] == 12 and g["scroll"] <= g["vh"] + 1, f"[{label}] Associer : 12 tuiles sans défilement de la page ({g['scroll']} px pour {g['vh']})")
+            check(not g["overflow"], f"[{label}] Associer : le texte de chaque tuile tient dans la tuile")
+            if mobile:
+                check(g["cols"] == 3 and g["vh"] - g["bottom"] <= 20, f"[{label}] Associer (téléphone) : 3 colonnes, la grille remplit la hauteur (bas à {g['bottom']} / {g['vh']})")
+            else:
+                check(g["cols"] == 4 and g["width"] <= 721 and abs(g["left"] - (g["vw"] - g["right"])) <= 2, f"[{label}] Associer (ordinateur) : 4 colonnes centrées, largeur limitée ({g['width']} px)")
+            # Après une paire trouvée, les autres tuiles ne bougent pas
+            before = tile_rects(page)
+            texts = page.locator(".tile").all_inner_texts()
+            k = next(j for j, t in enumerate(texts) if j > 0 and t.strip() == answer_for(cards, texts[0]).strip())
+            page.locator(".tile").nth(0).click(); page.locator(".tile").nth(k).click(); page.wait_for_timeout(450)
+            after = tile_rects(page)
+            kept = [r for r in before if r[0] in {a[0] for a in after}]
+            check(len(after) == 10 and kept == after and page.locator(".tile.gone").count() == 2, f"[{label}] Associer : après une paire trouvée, les autres tuiles gardent place et taille")
         made_error = rnd == 1
         for _ in range(30):
             tiles = page.locator(".tile:not(.gone):not(.good)")
@@ -243,7 +417,8 @@ def run(p, label, viewport, mobile, dark=False):
     shot("85-folder-subfolders")
     page.goto(URL + "#/"); page.wait_for_timeout(300)
     roots = page.locator(".folder-tile b").all_inner_texts()
-    check(roots == ["Allemand", "Anglais", "Physique"], f"[{label}] accueil : seuls les dossiers de premier niveau ({roots})")
+    # Tri par défaut « Dernière révision » : Anglais (série révisée) d'abord, puis les dossiers jamais révisés par nom
+    check(roots == ["Anglais", "Allemand", "Physique"], f"[{label}] accueil : seuls les dossiers de premier niveau, tri par dernière révision ({roots})")
     allemand = page.locator(".folder-tile", has_text="Allemand")
     check("2 sous-dossiers" in allemand.inner_text() and "has-sub" in (allemand.get_attribute("class") or ""), f"[{label}] le bouton Allemand annonce ses 2 sous-dossiers")
     shot("86-home-subfolders")
@@ -351,6 +526,10 @@ def run(p, label, viewport, mobile, dark=False):
     b.close()
 
 with sync_playwright() as p:
+    grade_checks(p)
+    voice_checks(p)
+    small_match_checks(p)
+    sort_checks(p, {"width": 390, "height": 844}, True)
     run(p, "m", {"width": 390, "height": 844}, True)
     run(p, "d", {"width": 1280, "height": 860}, False)
     run(p, "k", {"width": 390, "height": 844}, True, dark=True)

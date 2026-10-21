@@ -1,8 +1,8 @@
-// Accueil : dossiers de premier niveau (boutons qui ouvrent la page du dossier), séries sans dossier, recherche, état vide.
-// Exporte aussi les éléments partagés par les pages de dossier et de série : tuiles, chemins, choix d'un dossier.
+// Accueil : dossiers de premier niveau (boutons qui ouvrent la page du dossier), séries sans dossier, recherche, tri, état vide.
+// Exporte aussi les éléments partagés par les pages de dossier et de série : tuiles, tri, chemins, choix d'un dossier.
 import { h, setChildren, add, icon, hlbar, toast, promptDialog, choiceDialog } from '../ui.js';
 import { store, folderKey, joinPath, parentPath, displayPath } from '../store.js';
-import { plural, fmtRelative, pct, normalize } from '../util.js';
+import { plural, fmtRelative, pct, normalize, ls } from '../util.js';
 import { SAMPLE_SET } from '../sample.js';
 
 /** Adresse de la page d'un dossier : #/folder/Allemand/Verbes (chaque niveau encodé). */
@@ -23,14 +23,17 @@ export function homeView(ctx) {
       h('a', { class: 'btn', href: '#/import' }, icon('text', 20), 'Importer'),
       h('button', { class: 'btn', onclick: () => newFolder(ctx) }, icon('folderPlus', 20), 'Nouveau dossier'),
       h('a', { class: 'btn btn-primary', href: '#/new' }, icon('plus', 20), 'Nouvelle série')));
-  add(ctx.main, head, searchWrap, list);
+  const sortRow = h('div', { class: 'sort-row hidden' }, sortControl(() => render()));
+  add(ctx.main, head, searchWrap, sortRow, list);
 
   const render = () => {
     const entries = Object.entries(store.state.sets);
     const all = store.folderList();
-    const roots = store.subfolders('');
+    const roots = sortFolders(store.subfolders(''));
+    const loose = entries.filter(([, s]) => !folderKey(s.folder));
     searchWrap.classList.toggle('hidden', entries.length < 5 && all.length < 5);
     head.classList.toggle('hidden', entries.length === 0 && all.length === 0);
+    sortRow.classList.toggle('hidden', roots.length + loose.length < 2 && !query);
     if (!entries.length && !all.length) {
       const s = store.state;
       // Nouvel appareil connecté : le cache est vide tant que le serveur n'a pas répondu.
@@ -41,7 +44,7 @@ export function homeView(ctx) {
     // Recherche : résultats à plat, tous dossiers et sous-dossiers confondus
     const q = normalize(query);
     if (q) {
-      const foundFolders = all.filter((f) => normalize(f.label).includes(q));
+      const foundFolders = sortFolders(all.filter((f) => normalize(f.label).includes(q)));
       const found = entries.filter(([, s]) => normalize(s.title).includes(q) || normalize(s.folder).includes(q)
         || Object.values(s.cards || {}).some((c) => normalize(c.term).includes(q) || normalize(c.definition).includes(q)));
       setChildren(list, !found.length && !foundFolders.length
@@ -55,7 +58,6 @@ export function homeView(ctx) {
       return;
     }
 
-    const loose = entries.filter(([, s]) => !folderKey(s.folder));
     setChildren(list,
       roots.length ? h('section', { class: 'shelf' }, h('h2', null, 'Dossiers'),
         h('div', { class: 'folders' }, roots.map((f) => folderTile(f)))) : null,
@@ -65,9 +67,50 @@ export function homeView(ctx) {
   ctx.watch(render);
 }
 
-/** Plus récemment révisées (ou modifiées) d'abord. */
+// ---------- Tri des dossiers et des séries ----------
+// Un seul réglage pour l'accueil et tous les dossiers, mémorisé sur l'appareil (revi.opts.sort).
+// Les dossiers restent avant les séries ; chaque groupe suit le même tri.
+export const SORTS = [['name', 'Nom (A → Z)'], ['newest', 'Plus récentes d’abord'], ['oldest', 'Plus anciennes d’abord'], ['studied', 'Dernière révision']];
+const SORT_KEY = 'revi.opts.sort';
+const SORT_DEFAULT = 'studied'; // le tri des séries d'avant 1.4.0
+export function sortMode() {
+  const v = ls.get(SORT_KEY, SORT_DEFAULT);
+  return SORTS.some(([k]) => k === v) ? v : SORT_DEFAULT;
+}
+const byName = (a, b) => a.localeCompare(b, 'fr', { numeric: true, sensitivity: 'base' });
+
+/** Trie selon le réglage. Une date inconnue (0) passe à la fin ; à égalité, ordre alphabétique (« Leçon 2 » avant « Leçon 10 »). */
+function sortBy(items, nameOf, createdOf, studiedOf) {
+  const mode = sortMode();
+  const byDate = mode === 'newest' || mode === 'oldest';
+  const keyed = items.map((it) => ({ it, name: nameOf(it), d: byDate ? createdOf(it) : mode === 'studied' ? studiedOf(it) : 0 }));
+  keyed.sort((a, b) => {
+    if (mode !== 'name') {
+      if (!a.d !== !b.d) return a.d ? -1 : 1;
+      if (a.d !== b.d) return mode === 'oldest' ? a.d - b.d : b.d - a.d;
+    }
+    return byName(a.name, b.name);
+  });
+  return keyed.map((k) => k.it);
+}
+
+/** Séries : par titre, par date de création, ou par dernière révision (à défaut, dernière modification). */
 export function sortSets(entries) {
-  return entries.slice().sort(([ia, a], [ib, b]) => (store.lastStudied(ib) || b.updatedAt || 0) - (store.lastStudied(ia) || a.updatedAt || 0));
+  return sortBy(entries, ([, s]) => s.title || '', ([, s]) => s.createdAt || s.updatedAt || 0, ([id, s]) => store.lastStudied(id) || s.updatedAt || 0);
+}
+
+/** Dossiers : par nom, par date de création (store.folderCreatedAt), ou par la révision la plus récente de leurs séries. */
+export function sortFolders(list) {
+  return sortBy(list, (f) => f.label, (f) => store.folderCreatedAt(f), (f) => store.folderStudiedAt(f));
+}
+
+/** Menu « Trier » présent à chaque niveau. onChange : réaffiche la page. */
+export function sortControl(onChange) {
+  const select = h('select', { class: 'sort-select', 'aria-label': 'Trier les dossiers et les séries',
+    onchange: (e) => { ls.set(SORT_KEY, e.target.value); onChange(); } },
+  SORTS.map(([v, label]) => h('option', { value: v }, label)));
+  select.value = sortMode();
+  return h('label', { class: 'sortbar' }, icon('sort', 18), h('span', { 'aria-hidden': 'true' }, 'Trier :'), select);
 }
 
 /** Bouton d'un dossier. Les chiffres et la progression comptent aussi les séries des sous-dossiers. */

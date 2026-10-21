@@ -4,7 +4,7 @@ Révi est une appli de fiches de révision (cartes, Apprendre, Test, Associer) q
 
 Ce fichier sert à reprendre le projet plus tard, seul ou avec Claude : il décrit l'architecture, les données, les règles de chaque mode, la mise en ligne et le débogage.
 
-Version documentée : **1.3.0** (18 octobre 2026).
+Version documentée : **1.4.0** (21 octobre 2026).
 
 ---
 
@@ -52,18 +52,18 @@ Après une modification du code, avant de remettre l'appli en ligne : **changer 
 | `js/main.js` | Démarrage, routeur, barre du haut, connexion Firebase, migration local vers compte, service worker, journal d'erreurs. |
 | `js/store.js` | Magasin de données central (`store`) et `LocalBackend` (localStorage). Toutes les lectures et écritures passent par lui. |
 | `js/cloud.js` | `CloudBackend` (Firestore) et fonctions de connexion (Google, email). Chargé seulement si Firebase est configuré. |
-| `js/util.js` | Outils : sentinelles `DELETE`/`inc`, fusion profonde, correction des réponses, import de texte, formats français, minuteur, voix, stockage sûr. |
-| `js/ui.js` | Création d'éléments `h()`, `setChildren()`, `add()`, icônes SVG, toasts, dialogues (`confirmDialog`, `promptDialog`, `checklistDialog` avec intertitres, `choiceDialog` à choix unique), menus, contrôles segmentés. |
+| `js/util.js` | Outils : sentinelles `DELETE`/`inc`, fusion profonde, correction des réponses (`grade`) et repérage des lettres erronées (`answerDiff`), import de texte, formats français, minuteur, voix (`speak`, `unlockSpeech`), stockage sûr. |
+| `js/ui.js` | Création d'éléments `h()`, `setChildren()`, `add()`, icônes SVG, toasts, dialogues (`confirmDialog`, `promptDialog`, `checklistDialog` avec intertitres, `choiceDialog` à choix unique), menus, contrôles segmentés, `diffText()` (lettres erronées en couleur). |
 | `js/version.js` | `APP_VERSION`. |
 | `js/sample.js` | Série d'exemple (connecteurs logiques en anglais). |
-| `js/views/home.js` | Accueil : boutons des dossiers de premier niveau, séries sans dossier, recherche (séries, cartes et dossiers), écran vide, bouton « Nouveau dossier ». Exporte `deckTile`, `folderTile`, `sortSets`, `newFolder`, `folderPath`, `pickFolder` (fenêtre « choisir un dossier »). |
-| `js/views/folder.js` | Page d'un dossier : fil d'Ariane, sous-dossiers, séries, « Sous-dossier », « Nouvelle série » pré-rangée, « Ranger ici » (séries et dossiers existants), renommer, déplacer, supprimer. |
+| `js/views/home.js` | Accueil : boutons des dossiers de premier niveau, séries sans dossier, recherche (séries, cartes et dossiers), menu « Trier », écran vide, bouton « Nouveau dossier ». Exporte `deckTile`, `folderTile`, `sortSets`, `sortFolders`, `sortControl`, `sortMode`, `newFolder`, `folderPath`, `pickFolder` (fenêtre « choisir un dossier »). |
+| `js/views/folder.js` | Page d'un dossier : fil d'Ariane, menu « Trier », sous-dossiers, séries, « Sous-dossier », « Nouvelle série » pré-rangée, « Ranger ici » (séries et dossiers existants), renommer, déplacer, supprimer. |
 | `js/views/set.js` | Page d'une série : chemin du dossier, modes, progression, résultats (graphiques), liste des cartes, menu (copier, télécharger, déplacer dans un dossier, réinitialiser, supprimer). |
 | `js/views/editor.js` | Création / modification d'une série et import de texte. Le champ « Dossier » accepte un chemin (« Allemand / Verbes »). |
-| `js/views/cards.js` | Mode Cartes. |
+| `js/views/cards.js` | Mode Cartes (dont la lecture automatique). |
 | `js/views/learn.js` | Mode Apprendre. |
 | `js/views/test.js` | Mode Test. |
-| `js/views/match.js` | Mode Associer. |
+| `js/views/match.js` | Mode Associer (grille plein écran, police ajustée à chaque tuile). |
 | `js/views/settings.js` | Réglages : compte, thème, installation, sauvegarde, diagnostic. Exporte aussi `loginForm()`. |
 | `js/views/gate.js` | Écran de connexion obligatoire (`gateView`) et écran « compte refusé » (`deniedView`). |
 | `vendor/firebase.js` | SDK Firebase 13.0.0 (app, auth, firestore) regroupé en un seul fichier. |
@@ -180,8 +180,9 @@ Une série est rangée dans un dossier par son champ texte `folder`, qui contien
 
 - **Comparaison** : sans tenir compte de la casse ni des espaces autour de chaque niveau (`folderKey()`) : « allemand / verbes » rejoint « Allemand/Verbes ». `canonicalFolder()` reprend la casse des dossiers existants.
 - **Arborescence** (`store._folderIndex()`, recalculée seulement quand les séries ou les dossiers changent) : fusionne les documents `folders` et les chemins cités par les séries. Les parents d'un chemin existent aussi, même sans document (« Allemand » pour « Allemand/Verbes »). Les séries d'avant 1.2.0, et celles importées depuis un fichier JSON avec `"folder": "Allemand/Verbes"`, apparaissent donc dans leur dossier même sans document.
-- **Créer** (`createFolder`) : crée un document pour le dossier et pour chacun de ses parents qui n'en a pas, pour qu'ils restent visibles même vides.
-- **Renommer / déplacer** (`renameFolder`, `moveFolder`, `moveFoldersInto`) : réécrit le début du chemin du dossier, de tous ses sous-dossiers et de toutes leurs séries. Refusé si un dossier du même nom existe déjà à la destination, ou si l'on range un dossier dans un de ses propres sous-dossiers.
+- **Créer** (`createFolder`) : crée un document pour le dossier et pour chacun de ses parents qui n'en a pas, pour qu'ils restent visibles même vides. Un dossier qui existait déjà sans document reçoit la date de son contenu, pas celle du jour.
+- **Dates** (pour le tri, depuis 1.4.0) : `folderCreatedAt(dossier)` renvoie le `createdAt` de son document le plus ancien ; pour un dossier sans document, celui du plus ancien élément qu'il contient (séries et sous-dossiers). `folderStudiedAt(dossier)` renvoie la révision la plus récente de ses séries, sous-dossiers compris (0 = jamais révisé).
+- **Renommer / déplacer** (`renameFolder`, `moveFolder`, `moveFoldersInto`) : réécrit le début du chemin du dossier, de tous ses sous-dossiers et de toutes leurs séries. Seuls `name` et `updatedAt` changent : `createdAt` est conservé (un dossier sans document en reçoit un daté de son contenu). Refusé si un dossier du même nom existe déjà à la destination, ou si l'on range un dossier dans un de ses propres sous-dossiers.
 - **Supprimer** (`deleteFolder`) : supprime ses documents. Rien d'autre n'est perdu : ses séries et ses sous-dossiers remontent d'un niveau (dans le dossier parent, ou sur l'accueil). Si un sous-dossier remonte à côté d'un dossier du même nom, les deux fusionnent.
 - Toutes ces opérations calculent leurs écritures à partir de l'état du moment, sans relire `store.state` entre deux écritures : avec Firestore, les écritures n'arrivent dans `store.state` qu'au prochain instantané (voir `tests/subfolders_cloud.py`).
 
@@ -219,12 +220,12 @@ Toute écriture est un objet imbriqué, fusionné en profondeur dans le document
 
 - **Lecture** :
   - `state.sets`, `state.progress` ;
-  - `getSet(id)`, `cardsOf(set)` (liste triée), `progressOf(id)`, `cardProgress(id, cardId)`, `statusOf(id, cardId)`, `sessionsOf(id)` (plus récente d'abord), `lastStudied(id)`, `folders()` (chemins), `folderList()` (tous les dossiers : `{ key, name, label, parent, depth, setIds, children }`), `getFolder(chemin)`, `subfolders(chemin)` (`''` = accueil), `folderSetIds(chemin, deep)`, `canonicalFolder(chemin)`.
+  - `getSet(id)`, `cardsOf(set)` (liste triée), `progressOf(id)`, `cardProgress(id, cardId)`, `statusOf(id, cardId)`, `sessionsOf(id)` (plus récente d'abord), `lastStudied(id)`, `folders()` (chemins), `folderList()` (tous les dossiers : `{ key, name, label, parent, depth, setIds, children }`), `folderCreatedAt(dossier)`, `folderStudiedAt(dossier)`, `getFolder(chemin)`, `subfolders(chemin)` (`''` = accueil), `folderSetIds(chemin, deep)`, `canonicalFolder(chemin)`.
 - **Chemins** (fonctions exportées par `store.js`) : `splitPath`, `joinPath`, `folderKey`, `parentPath`, `baseName`, `displayPath` (« Allemand › Verbes »), `inputPath` (« Allemand / Verbes »).
 - **Séries** : `createSet({...})` (renvoie l'id), `updateSet(id, {title, folder, termLang, defLang, cards})` (calcule la différence avec l'existant), `toggleStar`, `deleteSet`. Le dossier indiqué est créé s'il n'existe pas.
 - **Dossiers** : `createFolder(chemin)` (renvoie le chemin exact), `renameFolder(chemin, nouveauNom)`, `moveFolder(chemin, nouveauChemin)`, `moveFoldersInto(chemins, destination)` (renvoie `{ moved, errors }`), `deleteFolder(chemin)`, `moveSetsToFolder(ids, chemin)`.
 - **Progression** : `recordAnswer(id, cardId, ok, lvl?)`, `adjustCounts`, `setLevel`, `resetLearn`, `addSession(id, session, existingId?)`, `setBestMatch(id, ms)`.
-- **Sauvegarde** : `exportAll()`, `importAll(data)` (fusion), `copyInto(data)`. Les dossiers sont inclus.
+- **Sauvegarde** : `exportAll()`, `importAll(data)` (fusion ; une série sans `createdAt` en reçoit un), `copyInto(data)`. Les dossiers sont inclus.
 - **État** : `mode` (`local`/`cloud`), `user`, `pending` (envois en attente), `fromCache`, `online`, `cloudConfigured`, `cloudError`, `ready`, `requireLogin`, `allowSignup`, `accessDenied`.
 
 ### 4.4 Clés `localStorage`
@@ -237,7 +238,8 @@ Toute écriture est un objet imbriqué, fusionné en profondeur dans le document
 | `revi.lastMode` | `local` / `cloud` (pour savoir s'il faut attendre Firebase au démarrage). |
 | `revi.migrated.<uid>` | Séries locales déjà envoyées dans ce compte. |
 | `revi.errors` | 15 dernières erreurs (affichées dans Diagnostic). |
-| `revi.opts.cards` / `.learn` / `.test` | Options choisies dans chaque mode (propres à l'appareil). |
+| `revi.opts.cards` / `.learn` / `.test` | Options choisies dans chaque mode (propres à l'appareil). `revi.opts.cards.autoplay` : lecture automatique (activée par défaut). |
+| `revi.opts.sort` | Tri des dossiers et des séries : `name`, `newest`, `oldest` ou `studied` (défaut). Un seul réglage pour l'accueil et tous les dossiers. |
 
 ### 4.5 Firestore
 
@@ -302,6 +304,17 @@ service cloud.firestore {
 
 ## 6. Règles des modes
 
+### Tri des dossiers et des séries (accueil et pages de dossier)
+
+- Menu « Trier » à chaque niveau (affiché dès qu'il y a au moins 2 éléments à trier) :
+  - **Nom (A → Z)** : ordre alphabétique à la française (`localeCompare('fr', { numeric: true, sensitivity: 'base' })` : « Leçon 2 » avant « Leçon 10 », accents et majuscules sans effet) ;
+  - **Plus récentes d'abord** / **Plus anciennes d'abord** : date de création (`createdAt` ; pour un dossier, `store.folderCreatedAt`) ;
+  - **Dernière révision** (par défaut, l'ordre des séries d'avant 1.4.0) : une série prend la date de sa dernière session, à défaut de sa dernière modification ; un dossier prend la date de la série la plus récemment révisée qu'il contient, sous-dossiers compris. Un dossier jamais révisé passe à la fin.
+- Un seul réglage pour toute l'appli, mémorisé sur l'appareil (`revi.opts.sort`) : le changer sur une page le change partout.
+- Les dossiers restent avant les séries ; chaque groupe suit le même tri. À égalité (ou date inconnue, placée à la fin), l'ordre alphabétique départage.
+- Les résultats de recherche et la liste « Ranger ici » suivent aussi ce tri.
+- Code : `sortSets`, `sortFolders`, `sortControl` dans `home.js`.
+
 ### Cartes
 
 - Clic, espace ou toucher pour retourner la carte.
@@ -313,7 +326,14 @@ service cloud.firestore {
   - En fin de paquet : bouton « Revoir les N cartes ».
 - Sans tri : ← → pour naviguer, glisser à gauche pour la carte suivante.
 - S : mettre ou retirer l'étoile.
-- Le haut-parleur lit la carte si une langue est choisie dans la série (synthèse vocale du navigateur).
+- Le haut-parleur lit la carte si une langue est choisie dans la série (synthèse vocale du navigateur). Le contenu entre parenthèses n'est pas lu.
+- **Lecture automatique** (option, activée par défaut, mémorisée dans `revi.opts.cards`) :
+  - à chaque retournement, la face qui apparaît est lue une fois l'animation terminée (`transitionend`, avec un minuteur de secours de 600 ms ; immédiatement si l'appareil réduit les animations) ;
+  - la carte qui arrive (suivante, précédente, annulée, ou première du paquet) est lue aussi ;
+  - chaque nouvelle lecture coupe la précédente : des retournements rapides ne s'enchaînent pas en retard ;
+  - la lecture suit la face réellement affichée (option « Face visible ») ; une face sans langue n'est pas lue ;
+  - série sans langue : l'option est grisée, avec une indication pour choisir la langue dans l'éditeur.
+  - iPhone : Safari n'autorise la voix qu'à la suite d'un toucher. `unlockSpeech()` lance une phrase muette au premier toucher (ou à la première touche) de la séance, ce qui autorise les lectures lancées ensuite après l'animation.
 - Ce mode ne change pas le niveau des cartes.
 
 ### Apprendre
@@ -342,31 +362,36 @@ service cloud.firestore {
 ### Associer
 
 - Jusqu'à 6 paires (12 tuiles) tirées au hasard. Toucher un terme puis sa définition.
+- **Grille plein écran** : pendant la partie, `main` reçoit la classe `match-play` et la grille occupe toute la hauteur sous le chrono, sans défilement (`100dvh`, avec `100vh` en secours, et marges de sécurité de l'iPhone).
+  - Téléphone ou tablette à la verticale : 3 colonnes (2 jusqu'à 8 tuiles), soit 4 rangées pour 12 tuiles.
+  - À l'horizontale : 4 colonnes (2 ou 3 s'il y a peu de tuiles). Sur un écran bas (téléphone couché), la barre du haut et le chrono se compactent.
+  - Ordinateur : 4 colonnes centrées, 720 px de large au plus, tuiles de 150 px de haut au plus.
+  - Hauteur d'une tuile plafonnée (180 px, `--tile-max`) : peu de cartes ne donnent pas des tuiles géantes.
+  - Une paire trouvée devient invisible mais garde sa place : les autres tuiles ne bougent pas.
+  - Police ajustée à chaque tuile (`fitTile`) : réduite tant que le texte dépasse, sans descendre sous 12 px, recalculée quand l'écran tourne ou change de taille. Un mot trop long fait d'abord réduire la police ; il n'est coupé que s'il ne tient toujours pas à 12 px.
 - Une erreur ajoute 1 s de pénalité (`PENALTY` dans `match.js`). Toucher deux tuiles du même côté change simplement la sélection, sans pénalité.
 - Si deux cartes ont le même terme ou la même définition, les deux associations sont acceptées.
 - Le record (`best.match`) et les 5 derniers temps sont affichés.
 
 ### Correction des réponses écrites (`util.js > grade`)
 
-1. Normalisation :
-   - minuscules ;
+Règle stricte (depuis 1.4.0), la même pour Apprendre et Test et pour toutes les langues : **seule la réponse exacte est acceptée**. Les lettres et les accents doivent être exacts.
+
+1. Normalisation (ce qui est ignoré) :
+   - majuscules (`autocapitalize="off"` coupe en plus la majuscule automatique du téléphone) ;
    - apostrophes supprimées ;
    - ponctuation et points de suspension ignorés ;
    - tirets et barres remplacés par des espaces ;
    - espaces regroupés.
 2. Formes acceptées :
-   - la réponse complète ;
-   - la réponse sans ce qui est entre parenthèses ;
-   - si la réponse contient `,` `;` ou `/` : chacune des variantes (ex. « besides, moreover » accepte « besides »). La réponse complète est alors rappelée.
-3. Si les accents sont faux : accepté, avec « Attention aux accents ».
-4. Petites fautes de frappe (distance de Levenshtein, sans les accents) : accepté, avec « Petite faute ». Tolérance selon la longueur de la réponse :
+   - la réponse complète, avec ou sans ce qui est entre parenthèses (ex. « sollen » et « sollen (soll – sollte – hat gesollt) » pour « sollen (soll – sollte – hat gesollt) ») ;
+   - si la réponse contient `,` `;` ou `/` : chacune des variantes (ex. « besides, moreover » accepte « besides »). La réponse complète est alors rappelée. Le découpage se fait **en dehors des parenthèses** : pour « devoir (conseil, ordre d'autrui) ; être censé », « devoir » et « être censé » sont acceptés, « ordre d'autrui » est refusé.
+3. Tout le reste est faux : « wöllen » pour « sollen », « etre » pour « être », « schon » ou « schoen » pour « schön », « Strasse » pour « Straße ». Aucune écriture de remplacement (« ss » pour « ß », « oe » pour « ö »…).
+4. Le bouton « En fait, j'avais juste » reste proposé après toute réponse écrite fausse (Apprendre et Test) : en cas de vraie faute de frappe, c'est l'utilisateur qui décide.
 
-   | Longueur de la réponse | Erreurs tolérées |
-   |---|---|
-   | 3 caractères ou moins | 0 |
-   | 4 à 7 | 1 |
-   | 8 à 14 | 2 |
-   | plus de 14 | 3 |
+**Lettres erronées** (`answerDiff`) : quand la réponse fausse est proche (40 % de lettres fausses au plus, comptées sur la variante la plus proche), la correction l'aligne lettre à lettre sur la réponse attendue, en ignorant majuscules, ponctuation et contenu entre parenthèses. « Votre réponse » montre en rouge, soulignées, les lettres fausses ou en trop, et un repère rouge à la place d'une lettre manquante ; dans la réponse attendue, les bonnes lettres sont surlignées en jaune. Pour une réponse sans rapport, seule la bonne réponse est affichée.
+
+Avant 1.4.0, les fautes d'accents et les petites fautes de frappe (distance de Levenshtein) étaient acceptées. Problème : « wöllen » passait pour « sollen » (accent retiré, puis 1 faute tolérée), alors que « wollen » est un autre mot.
 
 ### Import de texte (`util.js > detectSeparators / parseImport`)
 
@@ -486,6 +511,10 @@ Le dossier `tests/` contient des scripts Playwright (Python) :
 
 - `e2e.py` : joue chaque mode sur mobile, ordinateur et en thème sombre, et vérifie :
   - les notes et la progression ;
+  - la correction stricte (`grade` testée dans le navigateur, lettres erronées) ;
+  - la lecture automatique du mode Cartes (avec une fausse synthèse vocale qui enregistre les appels) ;
+  - la grille d'Associer (pas de défilement, colonnes, tuiles qui ne bougent pas) ;
+  - le tri des dossiers et des séries (chaque option, à l'accueil et dans un dossier, après rechargement et après un renommage) ;
   - l'import ;
   - les dossiers et sous-dossiers (créer, ranger, renommer, déplacer, supprimer) ;
   - la persistance ;
@@ -514,15 +543,23 @@ python3 tests/gate_smoke.py
 - **Pas d'images ni d'audio enregistré dans les cartes** : texte seulement, plus la synthèse vocale du navigateur.
 - **Pas de partage de séries** entre comptes. Idée : collection publique `shared/{id}` avec des règles en lecture seule.
 - **Pas de création automatique de cartes depuis un cours** (nécessiterait un service d'IA externe).
-- **Mode Associer** : pas de version à glisser-déposer (toucher-toucher uniquement), et une seule taille de grille.
+- **Mode Associer** : pas de version à glisser-déposer (toucher-toucher uniquement). 6 paires au plus par partie.
 - **Conflits** : sur une même carte modifiée simultanément hors ligne sur deux appareils, la dernière modification gagne.
 - **Dossiers** : pas de glisser-déposer pour ranger (menu « Ranger ici » ou « Déplacer »). Un dossier modifié simultanément hors ligne sur deux appareils (ex. renommé sur l'un, déplacé sur l'autre) peut se retrouver en double : il suffit de déplacer ou supprimer le doublon.
 - La déconnexion ne vide pas le cache Firestore de l'appareil (pensé pour des appareils personnels).
+- **Tri** : réglage propre à chaque appareil (pas synchronisé). Une version synchronisée serait possible via un document `users/{uid}/prefs`, déjà couvert par les règles.
+- **Lecture à voix haute** : la qualité dépend des voix installées sur l'appareil ; certaines langues peuvent manquer.
 
 ---
 
 ## 12. Historique des versions
 
+- **1.4.0** (21 octobre 2026) : tri, lecture automatique, Associer plein écran, correction stricte.
+  - Menu « Trier » à l'accueil et dans chaque dossier : nom, plus récentes, plus anciennes, dernière révision (par défaut). Un seul réglage pour toute l'appli, mémorisé sur l'appareil. Avec « Dernière révision », les dossiers suivent aussi ce tri (ils étaient toujours par nom avant).
+  - Les dossiers renommés ou déplacés gardent leur date de création ; un dossier sans document prend celle de son contenu. Une série importée sans date en reçoit une.
+  - Mode Cartes : lecture automatique de la face qui apparaît (retournement et nouvelle carte), activée par défaut, désactivable dans les options.
+  - Mode Associer : la grille occupe tout l'écran sans défilement (3 colonnes à la verticale, 4 à l'horizontale et sur ordinateur), tuiles de taille plafonnée, police ajustée à chaque tuile.
+  - Correction stricte des réponses écrites (Apprendre et Test) : plus de tolérance aux fautes de frappe ni aux accents. Seuls le contenu entre parenthèses, les majuscules, les espaces et la ponctuation sont ignorés. Les variantes sont découpées hors parenthèses. Lettres erronées en couleur quand la réponse est proche.
 - **1.3.0** (18 octobre 2026) : sous-dossiers.
   - Un dossier peut contenir des sous-dossiers, sur autant de niveaux que voulu (ex. Allemand > Bases, Allemand > Verbes). L'accueil n'affiche que les dossiers de premier niveau.
   - Page d'un dossier : bouton « Sous-dossier », section « Sous-dossiers », fil d'Ariane vers les dossiers parents. Le bouton retour remonte d'un niveau.
