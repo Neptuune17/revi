@@ -22,6 +22,8 @@ Modèle de message :
 > Sur quel appareil : [iPhone / Android / PC, navigateur]. Ce que je fais : [étapes]. Ce qui se passe : [résultat]. Ce que j'attends : [résultat voulu].
 > Rapport de diagnostic : [coller ici]
 
+Si la conversation a accès au dépôt GitHub `Neptuune17/revi`, le .zip est inutile : Claude lit le code dans le dépôt, lance les tests et pousse ses modifications sur une branche, avec une demande de fusion (pull request) à valider. La fusion dans `main` met l'appli en ligne (GitHub Pages).
+
 Après une modification du code, avant de remettre l'appli en ligne : **changer la version** (section 9), sinon les appareils garderont l'ancienne version en cache.
 
 ---
