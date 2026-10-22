@@ -5,6 +5,40 @@ import { shuffle, sample, normalize, fmtSeconds, plural, fmtRelative } from '../
 
 const MAX_PAIRS = 6;
 const PENALTY = 1000;
+const MIN_FONT = 12; // px : plancher de l'ajustement automatique du texte des tuiles
+
+/**
+ * Grille selon l'orientation et le nombre de tuiles, pour remplir l'écran sans trou inutile.
+ * Verticale : 3 colonnes (2 jusqu'à 8 tuiles). Horizontale : 4 colonnes (moins s'il y a peu de tuiles).
+ */
+function gridShape(n) {
+  const portrait = matchMedia('(orientation: portrait)').matches;
+  const cols = portrait ? (n <= 8 ? 2 : 3) : (n <= 4 ? 2 : n <= 6 ? 3 : 4);
+  return { cols, rows: Math.ceil(n / cols) };
+}
+
+/**
+ * Réduit la police d'une tuile (sans passer sous MIN_FONT) jusqu'à ce que le texte tienne.
+ * Pendant la mesure, les mots ne sont pas coupés : un mot trop long fait d'abord réduire la police.
+ * S'il ne tient toujours pas au plancher, la feuille de style le coupe (overflow-wrap: anywhere).
+ */
+function fitTile(el) {
+  const txt = el.firstElementChild;
+  if (!txt) return;
+  el.style.fontSize = '';
+  txt.style.overflowWrap = 'normal';
+  const cs = getComputedStyle(el);
+  const maxW = el.clientWidth - parseFloat(cs.paddingLeft) - parseFloat(cs.paddingRight);
+  const maxH = el.clientHeight - parseFloat(cs.paddingTop) - parseFloat(cs.paddingBottom);
+  let size = parseFloat(cs.fontSize);
+  if (maxW > 0 && maxH > 0) {
+    while (size > MIN_FONT && (txt.offsetHeight > maxH + 0.5 || txt.scrollWidth > maxW + 0.5)) {
+      size = Math.max(MIN_FONT, size - 1);
+      el.style.fontSize = size + 'px';
+    }
+  }
+  txt.style.overflowWrap = '';
+}
 
 export function matchView(ctx) {
   const id = ctx.params.id;
@@ -20,6 +54,13 @@ export function matchView(ctx) {
     return;
   }
   const pairs = Math.min(MAX_PAIRS, all.length);
+  let stopLayout = () => {};
+
+  /** Plein écran pendant la partie : la grille remplit la hauteur restante (voir main.match-play dans app.css). */
+  function setPlaying(on) {
+    stopLayout(); stopLayout = () => {};
+    ctx.main.classList.toggle('match-play', on);
+  }
 
   function recentTimes() {
     return store.sessionsOf(id).filter((s) => s.mode === 'match' && s.ms).slice(0, 5);
@@ -27,6 +68,7 @@ export function matchView(ctx) {
 
   function startScreen() {
     cancelAnimationFrame(raf);
+    setPlaying(false);
     const best = store.progressOf(id).best?.match;
     const recent = recentTimes();
     const go = h('button', { class: 'btn btn-primary btn-lg', onclick: play }, 'Commencer');
@@ -66,8 +108,9 @@ export function matchView(ctx) {
         || normalize(term.text) === normalize(def.card.term);
     };
 
+    // Une tuile trouvée devient invisible mais garde sa place : les autres ne bougent pas.
     tiles.forEach((t) => {
-      t.el = h('button', { class: 'tile' + (t.text.length > 48 ? ' long' : ''), lang: (t.side === 'term' ? set.termLang : set.defLang) || null, onclick: () => tap(t) }, t.text);
+      t.el = h('button', { class: 'tile', lang: (t.side === 'term' ? set.termLang : set.defLang) || null, onclick: () => tap(t) }, h('span', { class: 'tile-text' }, t.text));
       add(grid, t.el);
     });
 
@@ -100,6 +143,7 @@ export function matchView(ctx) {
 
     function finish() {
       cancelAnimationFrame(raf);
+      setPlaying(false);
       const ms = Math.round(elapsed());
       const prevBest = store.progressOf(id).best?.match;
       const isRecord = store.setBestMatch(id, ms);
@@ -115,10 +159,26 @@ export function matchView(ctx) {
       requestAnimationFrame(() => { if (matchMedia('(hover: hover)').matches) again.focus({ preventScroll: true }); });
     }
 
+    setPlaying(true);
     setChildren(ctx.main, h('div', { class: 'match-top' }, clock, errEl), grid);
+    // Colonnes et rangées selon l'orientation, puis police ajustée à la taille réelle des tuiles.
+    let fitRaf = null;
+    const relayout = () => {
+      cancelAnimationFrame(fitRaf);
+      const { cols, rows } = gridShape(tiles.length);
+      grid.style.setProperty('--cols', cols);
+      grid.style.setProperty('--rows', rows);
+      fitRaf = requestAnimationFrame(() => tiles.forEach((t) => fitTile(t.el)));
+    };
+    const portrait = matchMedia('(orientation: portrait)');
+    window.addEventListener('resize', relayout);
+    portrait.addEventListener?.('change', relayout);
+    stopLayout = () => { cancelAnimationFrame(fitRaf); window.removeEventListener('resize', relayout); portrait.removeEventListener?.('change', relayout); };
+    relayout();
+    document.fonts?.ready.then(() => { if (grid.isConnected) relayout(); });
     tick();
   }
 
-  ctx.onCleanup(() => cancelAnimationFrame(raf));
+  ctx.onCleanup(() => { cancelAnimationFrame(raf); stopLayout(); });
   startScreen();
 }

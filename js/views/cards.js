@@ -1,7 +1,11 @@
-// Mode Cartes : retourner (clic, espace), glisser, trier « je sais / à revoir », étoiles, lecture à voix haute.
+// Mode Cartes : retourner (clic, espace), glisser, trier « je sais / à revoir », étoiles, lecture à voix haute
+// (bouton haut-parleur, et lecture automatique de la face qui apparaît).
 import { h, setChildren, add, icon, toast, segmented, hlbar } from '../ui.js';
 import { store } from '../store.js';
-import { shuffle, ls, ActiveTimer, plural, speak, canSpeak } from '../util.js';
+import { shuffle, ls, ActiveTimer, plural, speak, canSpeak, unlockSpeech } from '../util.js';
+
+const FLIP_FALLBACK_MS = 600; // secours si la fin de l'animation du retournement n'est pas signalée
+const reducedMotion = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 export function cardsView(ctx) {
   const id = ctx.params.id;
@@ -9,9 +13,10 @@ export function cardsView(ctx) {
   if (!set) { ctx.go('/', { replace: true }); return; }
   ctx.setHeader({ study: true, back: `/set/${id}`, title: 'Cartes' });
 
-  const opts = { front: 'term', shuffle: false, starred: false, sort: true, ...ls.get('revi.opts.cards', {}) };
+  const opts = { front: 'term', shuffle: false, starred: false, sort: true, autoplay: true, ...ls.get('revi.opts.cards', {}) };
   const saveOpts = () => ls.set('revi.opts.cards', opts);
   const all = store.cardsOf(set);
+  const hasLang = !!(set.termLang || set.defLang);
   let timer = new ActiveTimer();
   let deck = [], index = 0, flipped = false, known = [], again = [], history = [], recorded = false, seen = 0;
 
@@ -33,6 +38,37 @@ export function cardsView(ctx) {
     index = 0; flipped = false; known = []; again = []; history = []; seen = 0; recorded = false;
     timer.stop(); timer = new ActiveTimer();
     renderAll();
+    sayVisible();
+  }
+
+  // ---------- Lecture automatique ----------
+  // Lit la face visible : à l'arrivée d'une carte, et à la fin de chaque retournement.
+  // Une nouvelle lecture coupe la précédente (retournements rapides). Rien n'est lu pour une face sans langue.
+  let speakTimer = null, speakEnd = null;
+  function stopSpeech() {
+    clearTimeout(speakTimer); speakTimer = null;
+    if (speakEnd) { flipEl?.removeEventListener('transitionend', speakEnd); speakEnd = null; }
+    if (canSpeak()) { try { window.speechSynthesis.cancel(); } catch { /* ignore */ } }
+  }
+  function sayVisible(afterFlip = false) {
+    if (!opts.autoplay || !hasLang || !canSpeak()) return;
+    stopSpeech();
+    if (index >= deck.length) return;
+    const c = deck[index];
+    const showsTerm = (opts.front === 'term') !== flipped;
+    const text = showsTerm ? c.term : c.definition;
+    const lang = showsTerm ? set.termLang : set.defLang;
+    if (!lang || !text.trim()) return;
+    const el = flipEl;
+    const go = () => {
+      clearTimeout(speakTimer); speakTimer = null;
+      if (speakEnd) { el?.removeEventListener('transitionend', speakEnd); speakEnd = null; }
+      speak(text, lang);
+    };
+    if (!afterFlip || !el || reducedMotion()) { speakTimer = setTimeout(go, afterFlip ? 0 : 60); return; }
+    speakEnd = (e) => { if (e.target === el && e.propertyName === 'transform') go(); };
+    el.addEventListener('transitionend', speakEnd);
+    speakTimer = setTimeout(go, FLIP_FALLBACK_MS);
   }
 
   // ---------- Options ----------
@@ -42,7 +78,16 @@ export function cardsView(ctx) {
       h('div', { class: 'opt' }, h('span', null, 'Face visible'), segmented([['term', 'Terme'], ['def', 'Définition']], opts.front, (v) => { opts.front = v; saveOpts(); start(); }, 'Face visible')),
       h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: opts.sort, onchange: (e) => { opts.sort = e.target.checked; saveOpts(); start(); } }), 'Trier les cartes (je sais / à revoir)'),
       h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: opts.shuffle, onchange: (e) => { opts.shuffle = e.target.checked; saveOpts(); start(); } }), 'Mélanger'),
-      h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: opts.starred, onchange: (e) => { opts.starred = e.target.checked; saveOpts(); start(); } }), 'Cartes étoilées seulement')));
+      h('label', { class: 'check' }, h('input', { type: 'checkbox', checked: opts.starred, onchange: (e) => { opts.starred = e.target.checked; saveOpts(); start(); } }), 'Cartes étoilées seulement'),
+      canSpeak() ? h('label', { class: 'check' + (hasLang ? '' : ' disabled') },
+        h('input', { type: 'checkbox', checked: opts.autoplay && hasLang, disabled: !hasLang, onchange: (e) => {
+          opts.autoplay = e.target.checked; saveOpts();
+          if (opts.autoplay) sayVisible(); else stopSpeech();
+        } }),
+        h('span', null, 'Lecture automatique',
+          h('span', { class: 'small muted', style: { display: 'block' } }, hasLang
+            ? 'Lit la face qui apparaît, sans le contenu entre parenthèses.'
+            : 'Choisissez la langue des cartes dans la série (Modifier) pour l’activer.'))) : null));
 
   const top = h('div');
   const stageHost = h('div');
@@ -68,7 +113,7 @@ export function cardsView(ctx) {
     const frontLang = opts.front === 'term' ? set.termLang : set.defLang;
     const backLang = opts.front === 'term' ? set.defLang : set.termLang;
     const tools = (text, lang) => h('div', { class: 'face-tools' },
-      canSpeak() && lang ? h('button', { class: 'icon-btn', 'aria-label': 'Écouter', onclick: (e) => { e.stopPropagation(); speak(text, lang); } }, icon('speaker', 20)) : null,
+      canSpeak() && lang ? h('button', { class: 'icon-btn', 'aria-label': 'Écouter', onclick: (e) => { e.stopPropagation(); stopSpeech(); speak(text, lang); } }, icon('speaker', 20)) : null,
       h('button', { class: 'icon-btn' + (c.starred ? ' on' : ''), 'aria-label': c.starred ? 'Retirer l’étoile' : 'Ajouter une étoile', onclick: (e) => { e.stopPropagation(); star(); } }, icon(c.starred ? 'starFill' : 'star', 20)));
     const face = (cls, label, text, lang) => h('div', { class: `face bristol ${cls}${text.length > 110 ? ' long' : ''}` },
       h('span', { class: 'side' }, label), tools(text, lang), h('div', null, text));
@@ -95,7 +140,7 @@ export function cardsView(ctx) {
       h('p', { class: 'hint-keys' }, opts.sort ? 'Espace : retourner, → je sais, ← à revoir, Z : annuler, S : étoile' : 'Espace : retourner, ← → : naviguer, S : étoile'));
   }
 
-  function flip() { flipped = !flipped; flipEl?.classList.toggle('flipped', flipped); }
+  function flip() { flipped = !flipped; flipEl?.classList.toggle('flipped', flipped); sayVisible(true); }
   function star() {
     const c = deck[index];
     c.starred = !c.starred;
@@ -104,26 +149,30 @@ export function cardsView(ctx) {
   }
 
   /** dir 'right' = je sais (tri) ou précédente ; 'left' = à revoir (tri) ou suivante */
+  /** Affiche la carte qui arrive et lit sa face visible. */
+  const showNext = () => { renderAll(); sayVisible(); };
   function act(dir) {
     if (index >= deck.length) return;
     if (!opts.sort) {
       if (dir === 'right') { if (index === 0) return; index--; }
       else { index++; seen = Math.max(seen, index); }
       flipped = false;
-      animateOut(dir === 'left' ? -1 : 1, renderAll);
+      if (opts.autoplay) stopSpeech();
+      animateOut(dir === 'left' ? -1 : 1, showNext);
       return;
     }
     const c = deck[index];
     (dir === 'right' ? known : again).push(c);
     history.push(dir);
     index++; seen = Math.max(seen, index); flipped = false;
-    animateOut(dir === 'right' ? 1 : -1, renderAll);
+    if (opts.autoplay) stopSpeech();
+    animateOut(dir === 'right' ? 1 : -1, showNext);
   }
   function undo() {
     if (!history.length) return;
     const dir = history.pop();
     (dir === 'right' ? known : again).pop();
-    index--; flipped = false; renderAll();
+    index--; flipped = false; showNext();
   }
   function animateOut(sign, then) {
     if (!dragEl || matchMedia('(prefers-reduced-motion: reduce)').matches) { then(); return; }
@@ -202,6 +251,15 @@ export function cardsView(ctx) {
     else if (e.key.toLowerCase() === 'z' && opts.sort) undo();
   };
   document.addEventListener('keydown', onKey);
-  ctx.onCleanup(() => { document.removeEventListener('keydown', onKey); record(); timer.stop(); window.speechSynthesis?.cancel?.(); });
+  // iPhone : débloque la voix au premier toucher (ou à la première touche) de la séance.
+  const unlock = () => unlockSpeech();
+  document.addEventListener('pointerdown', unlock, true);
+  document.addEventListener('keydown', unlock, true);
+  ctx.onCleanup(() => {
+    document.removeEventListener('keydown', onKey);
+    document.removeEventListener('pointerdown', unlock, true);
+    document.removeEventListener('keydown', unlock, true);
+    record(); timer.stop(); stopSpeech();
+  });
   start();
 }

@@ -1,6 +1,6 @@
 // Mode Apprendre : manches de N cartes. Niveau 0 (pas vue) -> QCM ; niveau 1 (en cours) -> réponse écrite ; niveau 2 = maîtrisée.
 // Une erreur remet la carte au niveau 0 et elle revient une fois en fin de manche.
-import { h, setChildren, add, icon, segmented, hlbar } from '../ui.js';
+import { h, setChildren, add, icon, segmented, hlbar, diffText } from '../ui.js';
 import { store } from '../store.js';
 import { shuffle, sample, ls, grade, normalize, ActiveTimer, plural, speak, canSpeak, LANGS } from '../util.js';
 
@@ -147,7 +147,7 @@ export function learnView(ctx) {
     if (!value.trim()) { current.input.focus(); return; }
     const g = grade(value, current.answer);
     current.input.disabled = true;
-    settle(g.ok, { yours: value, note: g.note, kind: g.kind });
+    settle(g.ok, { yours: value, note: g.note, kind: g.kind, diff: g.diff });
   }
 
   function dontKnow() {
@@ -186,8 +186,9 @@ export function learnView(ctx) {
         ? h('button', { class: 'btn btn-ghost', onclick: () => overrideCorrect(card) }, 'En fait, j’avais juste') : null;
       setChildren(fb, h('div', { class: 'feedback ko' },
         h('div', { class: 'verdict' }, info.dontKnow ? 'On la revoit bientôt' : 'Pas tout à fait'),
-        info.yours && current.type === 'written' ? h('div', null, 'Votre réponse : ', h('span', { class: 'yours' }, info.yours)) : null,
-        h('div', null, 'Réponse : ', h('span', { class: 'expected' }, current.answer)),
+        info.yours && current.type === 'written' ? h('div', null, 'Votre réponse : ',
+          info.diff ? diffText(info.diff.yours, 'yours diffed') : h('span', { class: 'yours' }, info.yours)) : null,
+        h('div', null, 'Réponse : ', info.diff ? diffText(info.diff.expected, 'expected') : h('span', { class: 'expected' }, current.answer)),
         h('div', { class: 'row' }, cont, override)));
       requestAnimationFrame(() => focusSoft(cont));
     }

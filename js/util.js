@@ -37,7 +37,8 @@ export const sample = (arr, n) => shuffle(arr).slice(0, n);
 export const clamp = (v, a, b) => Math.min(b, Math.max(a, v));
 
 // ---------- Correction des réponses écrites ----------
-const stripAccents = (s) => s.normalize('NFD').replace(/\p{M}/gu, '');
+// Règle stricte : seule la réponse exacte est acceptée. Souplesses : contenu entre parenthèses facultatif,
+// une seule variante suffit (séparées par , ; /), majuscules, espaces et ponctuation ignorés. Accents et lettres exacts.
 const stripParens = (s) => s.replace(/\([^)]*\)/g, ' ').replace(/\[[^\]]*\]/g, ' ');
 
 /** Normalisation : minuscules, apostrophes et ponctuation ignorées, espaces regroupés. Garde les accents. */
@@ -52,51 +53,160 @@ export function normalize(s) {
     .trim();
 }
 
-export function levenshtein(a, b) {
-  if (a === b) return 0;
-  if (!a.length) return b.length;
-  if (!b.length) return a.length;
-  let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
-  for (let i = 1; i <= a.length; i++) {
-    const cur = [i];
-    for (let j = 1; j <= b.length; j++) {
-      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));
-    }
-    prev = cur;
-  }
-  return prev[b.length];
+/**
+ * Variantes d'une réponse : morceaux séparés par , ; / en dehors des parenthèses (et des crochets).
+ * « devoir (conseil, ordre d'autrui) ; être censé » -> « devoir (conseil, ordre d'autrui) » et « être censé » :
+ * la virgule entre parenthèses ne découpe pas. Renvoie [{ start, end }] (positions dans la chaîne, en caractères).
+ */
+function variantRanges(chars) {
+  const out = [];
+  let depth = 0, start = 0;
+  chars.forEach((ch, i) => {
+    if (ch === '(' || ch === '[') depth++;
+    else if ((ch === ')' || ch === ']') && depth > 0) depth--;
+    else if (depth === 0 && (ch === ',' || ch === ';' || ch === '/')) { out.push({ start, end: i }); start = i + 1; }
+  });
+  out.push({ start, end: chars.length });
+  return out.filter((r) => normalize(stripParens(chars.slice(r.start, r.end).join(''))));
 }
 
-/** Formes acceptées pour une réponse attendue : complète, sans parenthèses, et chaque variante séparée par , ; / */
+/**
+ * Formes acceptées : la réponse complète, avec ou sans ce qui est entre parenthèses, et chaque variante
+ * (avec ou sans ses parenthèses). Le découpage en variantes se fait hors parenthèses.
+ */
 export function acceptedForms(expected) {
   const forms = [];
   const add = (s, partial) => { const n = normalize(s); if (n && !forms.some((f) => f.text === n)) forms.push({ text: n, partial }); };
-  add(expected, false);
-  const noParen = stripParens(expected);
-  add(noParen, false);
-  const parts = noParen.split(/[,;/]/).map((p) => p.trim()).filter(Boolean);
-  if (parts.length >= 2) parts.forEach((p) => add(p, true));
+  const text = String(expected ?? '');
+  add(text, false);
+  add(stripParens(text), false);
+  const chars = Array.from(text);
+  const parts = variantRanges(chars);
+  if (parts.length >= 2) parts.forEach((r) => { const p = chars.slice(r.start, r.end).join(''); add(p, true); add(stripParens(p), true); });
   return forms;
 }
 
-const tolerance = (len) => (len <= 3 ? 0 : len <= 7 ? 1 : len <= 14 ? 2 : 3);
-
 /**
  * Corrige une réponse écrite.
- * @returns {{ok:boolean, kind:'exact'|'partial'|'accents'|'typo'|'wrong'|'empty', note?:string}}
+ * @returns {{ok:boolean, kind:'exact'|'partial'|'wrong'|'empty', note?:string, diff?:object|null}}
+ * diff (réponse fausse mais proche) : voir answerDiff.
  */
 export function grade(input, expected) {
   const inp = normalize(input);
   if (!inp) return { ok: false, kind: 'empty' };
-  const forms = acceptedForms(expected);
-  for (const f of forms) if (inp === f.text) return f.partial ? { ok: true, kind: 'partial', note: 'Réponse complète : ' + expected } : { ok: true, kind: 'exact' };
-  const inpA = stripAccents(inp);
-  for (const f of forms) if (inpA === stripAccents(f.text)) return { ok: true, kind: 'accents', note: 'Attention aux accents : ' + expected };
-  for (const f of forms) {
-    const t = stripAccents(f.text);
-    if (levenshtein(inpA, t) <= tolerance(t.length)) return { ok: true, kind: 'typo', note: 'Petite faute, la réponse exacte est : ' + expected };
+  for (const f of acceptedForms(expected)) {
+    if (inp === f.text) return f.partial ? { ok: true, kind: 'partial', note: 'Réponse complète : ' + expected } : { ok: true, kind: 'exact' };
   }
-  return { ok: false, kind: 'wrong' };
+  return { ok: false, kind: 'wrong', diff: answerDiff(input, expected) };
+}
+
+// Comparaison lettre à lettre, pour montrer les lettres erronées d'une réponse proche.
+const IGNORED = /[’‘`´'.,;:!?¿¡"“”«»()[\]{}*…]/u; // ponctuation : ignorée par la correction
+const SEPARATOR = /[\s\-–—_/\\]/u; // équivaut à une espace pour la correction
+const charKey = (ch) => (SEPARATOR.test(ch) ? ' ' : ch.toLocaleLowerCase());
+
+/**
+ * Aligne la réponse tapée sur la réponse attendue (ou sur la variante la plus proche).
+ * Ignore les majuscules, la ponctuation et le contenu entre parenthèses, comme grade().
+ * Renvoie null si la réponse n'est pas proche (plus de 40 % de lettres fausses) : on affiche alors seulement la réponse.
+ * Sinon { yours, expected } : listes de morceaux { t: texte, k: '' | 'bad' | 'miss' | 'fix' }.
+ *   yours : 'bad' = lettre fausse ou en trop, 'miss' = repère d'une lettre manquante ;
+ *   expected (réponse attendue complète) : 'fix' = lettre que la réponse tapée n'avait pas.
+ */
+export function answerDiff(input, expected) {
+  const typed = Array.from(String(input ?? '').normalize('NFC').replace(/\s+/g, ' ').trim());
+  const full = Array.from(String(expected ?? '').normalize('NFC'));
+  if (!typed.length || !full.length) return null;
+  // Lettres facultatives de la réponse attendue : entre parenthèses ou crochets, ponctuation.
+  const optional = [];
+  let depth = 0;
+  full.forEach((ch, i) => {
+    if (ch === '(' || ch === '[') depth++;
+    optional[i] = depth > 0 || IGNORED.test(ch);
+    if ((ch === ')' || ch === ']') && depth > 0) depth--;
+  });
+  const typedFree = typed.map((ch) => IGNORED.test(ch));
+
+  let best = null;
+  const ranges = variantRanges(full);
+  if (ranges.length > 1) ranges.unshift({ start: 0, end: full.length });
+  for (const { start, end } of ranges) {
+    const S = full.slice(start, end);
+    const opt = optional.slice(start, end);
+    // Espaces facultatives : en début et fin de variante, en double, ou collées à une partie facultative.
+    let prevSep = true;
+    const kept = [];
+    S.forEach((ch, j) => {
+      if (opt[j]) return;
+      const sep = charKey(ch) === ' ';
+      if (sep && prevSep) opt[j] = true; else kept.push(j);
+      prevSep = sep;
+    });
+    if (kept.length && charKey(S[kept[kept.length - 1]]) === ' ') opt[kept.pop()] = true;
+    const letters = kept.filter((j) => charKey(S[j]) !== ' ').length;
+    const r = align(typed, typedFree, S, opt);
+    const errors = r.ops.filter((o) => o.type === 'sub' || ((o.type === 'miss' || o.type === 'extra') && !o.free)).length;
+    const ratio = letters ? errors / letters : Infinity;
+    if (!best || ratio < best.ratio || (ratio === best.ratio && r.cost < best.cost)) best = { ...r, start, end, letters, errors, ratio };
+  }
+  if (!best || best.errors < 1 || best.errors > Math.floor(best.letters * 0.4)) return null;
+
+  const yours = [], exp = [];
+  const push = (list, t, k) => { const last = list[list.length - 1]; if (last && last.k === k && k !== 'miss') last.t += t; else list.push({ t, k }); };
+  full.slice(0, best.start).forEach((ch) => push(exp, ch, ''));
+  let missing = false;
+  for (const op of best.ops) {
+    if (op.type === 'miss') {
+      push(exp, op.s, op.free ? '' : 'fix');
+      if (!op.free && !missing) { yours.push({ t: '', k: 'miss' }); missing = true; }
+      continue;
+    }
+    missing = false;
+    if (op.type === 'match') { push(yours, op.t, ''); push(exp, op.s, ''); }
+    else if (op.type === 'sub') { push(yours, op.t, 'bad'); push(exp, op.s, 'fix'); }
+    else push(yours, op.t, op.free ? '' : 'bad'); // lettre en trop
+  }
+  full.slice(best.end).forEach((ch) => push(exp, ch, ''));
+  return { yours, expected: exp };
+}
+
+/**
+ * Distance d'édition avec coûts nuls pour ce que la correction ignore. Renvoie { cost, ops } (ops dans l'ordre).
+ * Une lettre tapée qui correspond à une partie facultative coûte presque rien (EPS) : à coût égal,
+ * on préfère montrer une lettre remplacée plutôt qu'une lettre « retrouvée » entre parenthèses.
+ */
+const EPS = 1e-3;
+function align(T, tFree, S, sOpt) {
+  const n = T.length, m = S.length;
+  const W = m + 1;
+  const d = new Float64Array((n + 1) * W);
+  const delT = (i) => (tFree[i] ? 0 : 1);
+  const delS = (j) => (sOpt[j] ? 0 : 1);
+  const keep = (j) => (sOpt[j] ? EPS : 0);
+  for (let j = 1; j <= m; j++) d[j] = d[j - 1] + delS(j - 1);
+  for (let i = 1; i <= n; i++) {
+    d[i * W] = d[(i - 1) * W] + delT(i - 1);
+    for (let j = 1; j <= m; j++) {
+      const same = charKey(T[i - 1]) === charKey(S[j - 1]);
+      let v = Math.min(d[(i - 1) * W + j] + delT(i - 1), d[i * W + j - 1] + delS(j - 1));
+      if (same) v = Math.min(v, d[(i - 1) * W + j - 1] + keep(j - 1));
+      else if (!sOpt[j - 1] && !tFree[i - 1]) v = Math.min(v, d[(i - 1) * W + j - 1] + 1);
+      d[i * W + j] = v;
+    }
+  }
+  const ops = [];
+  let i = n, j = m;
+  while (i > 0 || j > 0) {
+    const cur = d[i * W + j];
+    if (i > 0 && j > 0) {
+      const same = charKey(T[i - 1]) === charKey(S[j - 1]);
+      if (same && cur === d[(i - 1) * W + j - 1] + keep(j - 1)) { ops.push({ type: 'match', t: T[i - 1], s: S[j - 1] }); i--; j--; continue; }
+      if (!same && !sOpt[j - 1] && !tFree[i - 1] && cur === d[(i - 1) * W + j - 1] + 1) { ops.push({ type: 'sub', t: T[i - 1], s: S[j - 1] }); i--; j--; continue; }
+    }
+    if (j > 0 && cur === d[i * W + j - 1] + delS(j - 1)) { ops.push({ type: 'miss', s: S[j - 1], free: !!sOpt[j - 1] }); j--; continue; }
+    ops.push({ type: 'extra', t: T[i - 1], free: !!tFree[i - 1] }); i--;
+  }
+  return { cost: d[n * W + m], ops: ops.reverse() };
 }
 
 export const sameAnswer = (a, b) => normalize(a) === normalize(b);
@@ -185,6 +295,18 @@ export const LANGS = [
   ['de-DE', 'Allemand'], ['it-IT', 'Italien'], ['pt-PT', 'Portugais'], ['nl-NL', 'Néerlandais'], ['zh-CN', 'Chinois'], ['ja-JP', 'Japonais'], ['ar', 'Arabe'],
 ];
 export const canSpeak = () => typeof window !== 'undefined' && 'speechSynthesis' in window;
+let speechUnlocked = false;
+/**
+ * iPhone (Safari et appli installée) : la voix n'est autorisée qu'à la suite d'un toucher.
+ * Une phrase muette lancée pendant le premier toucher de la séance débloque les lectures suivantes,
+ * même celles lancées après une animation (lecture automatique du mode Cartes).
+ */
+export function unlockSpeech() {
+  if (speechUnlocked || !canSpeak()) return;
+  speechUnlocked = true;
+  try { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; window.speechSynthesis.speak(u); } catch { /* lecture indisponible */ }
+}
+/** Lit un texte dans la langue donnée, sans ce qui est entre parenthèses. Coupe la lecture en cours. */
 export function speak(text, lang) {
   if (!canSpeak() || !lang) return;
   try {

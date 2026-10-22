@@ -1,5 +1,5 @@
 // Mode Test : paramétrage, examen (vrai/faux, QCM, réponse écrite), correction au « stylo rouge », reprise des erreurs.
-import { h, setChildren, add, icon, segmented, confirmDialog } from '../ui.js';
+import { h, setChildren, add, icon, segmented, confirmDialog, diffText } from '../ui.js';
 import { store } from '../store.js';
 import { shuffle, sample, ls, grade, normalize, ActiveTimer, plural, pct, fmtDuration, clamp } from '../util.js';
 
@@ -104,7 +104,7 @@ export function testView(ctx) {
       } }, h('span', { class: 'kbd' }, String.fromCharCode(65 + j)), h('span', { class: 'txt' }, opt)));
       add(el, h('p', { class: 'ask' }, 'Choisissez la bonne réponse'), h('div', { class: 'choices' + (q.options.every((o) => o.length < 40) ? ' grid2' : '') }, btns));
     } else {
-      const input = h('input', { class: 'input', autocomplete: 'off', autocapitalize: 'off', spellcheck: 'false', placeholder: 'Votre réponse', 'aria-label': `Réponse à la question ${i + 1}`,
+      const input = h('input', { class: 'input', autocomplete: 'off', autocapitalize: 'off', autocorrect: 'off', spellcheck: 'false', placeholder: 'Votre réponse', 'aria-label': `Réponse à la question ${i + 1}`,
         lang: (q.side === 'def' ? set.defLang : set.termLang) || null,
         oninput: (e) => { q.user = e.target.value; onAnswer(); },
         onkeydown: (e) => { if (e.key === 'Enter') { e.preventDefault(); const inputs = [...ctx.main.querySelectorAll('.tq input')]; const k = inputs.indexOf(e.target); (inputs[k + 1] || e.target).focus(); } } });
@@ -120,7 +120,7 @@ export function testView(ctx) {
     for (const q of questions) {
       if (q.type === 'tf') q.ok = q.user === q.claimTrue;
       else if (q.type === 'mcq') q.ok = q.user != null && normalize(q.user) === normalize(q.answer);
-      else { const g = grade(q.user || '', q.answer); q.ok = g.ok; q.note = g.note; }
+      else { const g = grade(q.user || '', q.answer); q.ok = g.ok; q.note = g.note; q.diff = g.diff || null; }
       store.recordAnswer(id, q.card.id, q.ok);
     }
     const ok = questions.filter((q) => q.ok).length;
@@ -162,8 +162,11 @@ export function testView(ctx) {
       q.type === 'tf' ? h('div', { class: 'tf-claim' }, q.claim) : null,
       h('div', { class: 'corr' },
         q.ok && q.type !== 'tf' ? h('div', null, 'Votre réponse : ', h('b', null, userText)) : null,
-        !q.ok ? h('div', null, 'Votre réponse : ', userText ? h('span', { class: 'yours', style: { textDecoration: 'line-through', textDecorationColor: 'var(--red)', textDecorationThickness: '2px' } }, userText) : h('span', { class: 'muted' }, 'aucune')) : null,
-        !q.ok || q.type === 'tf' ? h('div', null, q.type === 'tf' ? 'Bonne réponse : ' : 'Réponse attendue : ', h('b', { style: { color: 'var(--green)' } }, expectedText)) : null,
+        !q.ok ? h('div', null, 'Votre réponse : ', !userText ? h('span', { class: 'muted' }, 'aucune')
+          : q.diff ? diffText(q.diff.yours, 'yours diffed')
+            : h('span', { class: 'yours', style: { textDecoration: 'line-through', textDecorationColor: 'var(--red)', textDecorationThickness: '2px' } }, userText)) : null,
+        !q.ok || q.type === 'tf' ? h('div', null, q.type === 'tf' ? 'Bonne réponse : ' : 'Réponse attendue : ',
+          h('b', { style: { color: 'var(--green)' } }, !q.ok && q.diff ? diffText(q.diff.expected) : expectedText)) : null,
         q.type === 'tf' && !q.claimTrue ? h('div', { class: 'small muted' }, 'La bonne association était : ', h('b', null, q.answer)) : null,
         q.ok && q.note ? h('div', { class: 'small muted' }, q.note) : null,
         !q.ok && q.type === 'written' && userText ? h('div', null, h('button', { class: 'btn btn-ghost', style: { paddingLeft: 0 }, onclick: () => {

@@ -195,6 +195,7 @@ textarea.input { resize: vertical; line-height: 1.45; }
   background-position: calc(100% - 20px) 50%, calc(100% - 15px) 50%; background-size: 5px 5px; background-repeat: no-repeat; }
 .check { display: flex; align-items: center; gap: 10px; min-height: 40px; cursor: pointer; }
 .check input { width: 20px; height: 20px; accent-color: var(--pen); flex: none; }
+.check.disabled { cursor: default; color: var(--ink-3); }
 
 /* Contrôle segmenté */
 .seg { display: inline-flex; padding: 3px; border-radius: 999px; background: var(--track); gap: 2px; flex-wrap: wrap; }
@@ -215,6 +216,18 @@ textarea.input { resize: vertical; line-height: 1.45; }
 /* ---------- Accueil : paquets de fiches ---------- */
 .shelf { margin-top: 26px; }
 .shelf > h2 { font-size: 1rem; color: var(--ink-2); font-weight: 700; margin-bottom: 12px; }
+
+/* Menu « Trier » (accueil et pages de dossier). 16 px minimum : sinon l'iPhone zoome en ouvrant le menu. */
+.sort-row { display: flex; justify-content: flex-end; margin: 4px 0 -14px; }
+.sortbar { display: inline-flex; align-items: center; gap: 6px; color: var(--ink-2); font-size: .9rem; font-weight: 650; }
+.sortbar svg { color: var(--ink-3); flex: none; }
+.sort-select {
+  appearance: none; -webkit-appearance: none; min-height: 38px; max-width: 62vw; padding: 0 32px 0 14px; border-radius: 999px;
+  border: 1px solid var(--line); background-color: var(--paper); color: var(--ink); font-size: max(16px, .94rem); font-weight: 650; cursor: pointer;
+  background-image: linear-gradient(45deg, transparent 50%, var(--ink-3) 50%), linear-gradient(135deg, var(--ink-3) 50%, transparent 50%);
+  background-position: calc(100% - 19px) 52%, calc(100% - 14px) 52%; background-size: 5px 5px; background-repeat: no-repeat;
+}
+.sort-select:hover { border-color: color-mix(in srgb, var(--pen) 45%, var(--line)); }
 
 /* Dossiers : chemises cartonnées avec un onglet */
 .folders { display: grid; grid-template-columns: repeat(auto-fill, minmax(165px, 1fr)); gap: 26px 14px; padding-top: 12px; }
@@ -448,6 +461,14 @@ body.study .topbar .sync { display: none; }
 .feedback .yours { text-decoration: line-through; text-decoration-color: var(--red); text-decoration-thickness: 2px; color: var(--ink-2); }
 .feedback .expected { font-weight: 700; }
 .feedback .note { font-size: .9rem; color: var(--ink-2); }
+/* Lettres erronées d'une réponse proche (Apprendre, correction du Test) */
+.diff { overflow-wrap: anywhere; }
+.diff.yours.diffed { text-decoration: none; color: var(--ink); }
+.diff mark { background: none; color: inherit; border-radius: 2px; }
+.diff .d-bad { color: var(--red); font-weight: 800; text-decoration: underline wavy var(--red); text-decoration-thickness: 1.5px; text-underline-offset: 3px; }
+.diff .d-fix { background: var(--hl); color: var(--hl-ink); font-weight: 800; padding: 0 1px; border-radius: 3px 6px 3px 6px; }
+.diff .d-miss { display: inline-block; position: relative; width: .45em; height: 1em; margin: 0 1px; vertical-align: -.12em; border-bottom: 2.5px solid var(--red); }
+.diff .d-miss::after { content: ""; position: absolute; left: 50%; bottom: -2px; width: 2px; height: .55em; background: var(--red); transform: translateX(-50%); border-radius: 1px; }
 .feedback .row { margin-top: 4px; }
 .hint-keys { margin-top: 14px; font-size: .8rem; color: var(--ink-3); text-align: center; }
 @media (hover: none) { .hint-keys, .choice .kbd { display: none; } }
@@ -498,7 +519,38 @@ body.study .topbar .sync { display: none; }
   overflow-wrap: break-word; hyphens: auto; -webkit-hyphens: auto;
 }
 @media (min-width: 640px) { .tile { min-height: 116px; font-size: 1rem; } }
-.tile.long { font-size: .82rem; }
+/* Partie en cours : la grille occupe toute la hauteur sous le chrono, sans défilement.
+   dvh = hauteur réellement visible (barre d'adresse comprise) ; vh en secours pour les anciens navigateurs.
+   Colonnes et rangées (--cols, --rows) choisies par match.js selon l'orientation ; --tile-max évite les tuiles géantes. */
+main.match-play {
+  --tile-max: 180px; --tile-min: 52px;
+  display: flex; flex-direction: column;
+  height: calc(100vh - var(--top-h) - env(safe-area-inset-top));
+  height: calc(100dvh - var(--top-h) - env(safe-area-inset-top));
+  padding-bottom: calc(12px + env(safe-area-inset-bottom));
+}
+main.match-play .match-top { flex: none; }
+main.match-play .tiles {
+  flex: 1 1 auto; min-height: 0; width: 100%; align-content: start;
+  grid-template-columns: repeat(var(--cols, 3), minmax(0, 1fr));
+  grid-template-rows: repeat(var(--rows, 4), minmax(var(--tile-min), var(--tile-max)));
+}
+main.match-play .tile { min-height: 0; overflow: hidden; padding: 8px 6px; font-size: 1.05rem; }
+.tile-text { display: block; width: 100%; overflow-wrap: anywhere; }
+/* Ordinateur : 4 colonnes centrées, taille limitée (moins de trajet pour la souris) */
+@media (orientation: landscape) and (min-width: 900px) {
+  main.match-play { --tile-max: 150px; }
+  main.match-play .tiles { max-width: 720px; margin: 0 auto; }
+}
+/* Téléphone à l'horizontale (écran bas) : barre et chrono plus compacts pour laisser la place aux tuiles */
+@media (max-height: 520px) {
+  body.study { --top-h: 46px; }
+  main.match-play { --tile-min: 40px; padding-top: 0; }
+  main.match-play .match-top { margin: 0 0 8px; }
+  main.match-play .clock { font-size: 1.45rem; }
+  main.match-play .tiles { gap: 8px; }
+  main.match-play .tile { padding: 4px 6px; font-size: .95rem; }
+}
 .tile.sel { background: var(--hl); border-color: var(--hl-strong); color: var(--hl-ink); }
 .tile.bad { border-color: var(--red); background: var(--red-soft); animation: shake .3s ease; }
 .tile.good { border-color: var(--green); background: var(--green-soft); }

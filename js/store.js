@@ -178,6 +178,29 @@ export const store = {
     walk(f);
     return out;
   },
+  /**
+   * Date de création d'un dossier : celle de son document le plus ancien. À défaut (dossier sans document :
+   * parent créé seulement par le chemin d'une série, dossier d'avant 1.2.0 ou venu d'un import), celle du plus
+   * ancien élément qu'il contient (séries et sous-dossiers). 0 = inconnue.
+   */
+  folderCreatedAt(f) {
+    const docs = this.state.folders || {};
+    const own = f.ids.map((id) => docs[id]?.createdAt).filter(Boolean);
+    if (own.length) return Math.min(...own);
+    let min = 0;
+    const take = (t) => { if (t && (!min || t < min)) min = t; };
+    const walk = (x) => {
+      x.setIds.forEach((sid) => { const s = this.state.sets[sid]; take(s?.createdAt || s?.updatedAt); });
+      x.ids.forEach((id) => take(docs[id]?.createdAt));
+      x.children.forEach(walk);
+    };
+    walk(f);
+    return min;
+  },
+  /** Dernière révision d'un dossier : la plus récente des séries qu'il contient, sous-dossiers compris. 0 = jamais révisé. */
+  folderStudiedAt(f) {
+    return this.folderSetIds(f.name, true).reduce((max, id) => Math.max(max, this.lastStudied(id) || 0), 0);
+  },
   /** Chemin avec la casse des dossiers existants (« allemand/verbes » -> « Allemand/Verbes »), sinon le chemin nettoyé. */
   canonicalFolder(path) {
     const { map } = this._folderIndex();
@@ -197,9 +220,11 @@ export const store = {
     const segs = splitPath(name);
     const now = Date.now();
     // Un document par niveau qui n'en a pas : le dossier reste visible même vide.
+    // Un dossier qui existait déjà sans document garde sa date (celle de son contenu) pour le tri par date.
     segs.forEach((_, i) => {
       const p = segs.slice(0, i + 1).join('/');
-      if (!map.get(folderKey(p))?.ids.length) this.backend.apply('folders', uid('f'), { name: p, createdAt: now, updatedAt: now });
+      const existing = map.get(folderKey(p));
+      if (!existing?.ids.length) this.backend.apply('folders', uid('f'), { name: p, createdAt: (existing && this.folderCreatedAt(existing)) || now, updatedAt: now });
     });
     return name;
   },
@@ -220,12 +245,14 @@ export const store = {
     if ((other && other.key !== f.key) || taken?.has(destKey)) throw new Error(`Il y a déjà un dossier « ${segs[segs.length - 1]} » à cet endroit.`);
     if (dest === f.name) return dest;
     const now = Date.now();
+    const created = this.folderCreatedAt(f) || now; // un dossier renommé ou déplacé garde sa date de création
     const rebase = (path) => joinPath(dest, splitPath(path).slice(f.depth + 1).join('/'));
     const docs = Object.entries(this.state.folders || {}).filter(([, d]) => d && inTree(folderKey(d.name), f.key));
     const sets = Object.entries(this.state.sets).filter(([, s]) => s && s.folder && inTree(folderKey(s.folder), f.key));
     if (parent) this.createFolder(parent);
     // Tous les documents concernés (il peut exister des doublons créés hors ligne sur deux appareils).
-    if (!docs.some(([, d]) => folderKey(d.name) === f.key)) this.backend.apply('folders', uid('f'), { name: dest, createdAt: now, updatedAt: now });
+    // Seuls le nom et updatedAt changent : createdAt est conservé.
+    if (!docs.some(([, d]) => folderKey(d.name) === f.key)) this.backend.apply('folders', uid('f'), { name: dest, createdAt: created, updatedAt: now });
     docs.forEach(([id, d]) => this.backend.apply('folders', id, { name: rebase(d.name), updatedAt: now }));
     sets.forEach(([sid, s]) => this.backend.apply('sets', sid, { folder: rebase(s.folder), updatedAt: now }));
     taken?.add(destKey);
@@ -380,7 +407,13 @@ export const store = {
   importAll(data) {
     if (!data || !isPlainObject(data.sets)) throw new Error('Fichier non reconnu : ce n’est pas une sauvegarde Révi.');
     let n = 0;
-    for (const [id, s] of Object.entries(data.sets)) { if (isPlainObject(s)) { this.backend.apply('sets', id, s); n++; } }
+    const now = Date.now();
+    // createdAt (tri par date) : celui du fichier, sinon celui de la série déjà présente, sinon la date de modification ou d'import.
+    for (const [id, s] of Object.entries(data.sets)) {
+      if (!isPlainObject(s)) continue;
+      this.backend.apply('sets', id, { ...s, createdAt: s.createdAt || this.state.sets[id]?.createdAt || s.updatedAt || now });
+      n++;
+    }
     for (const [id, p] of Object.entries(data.progress || {})) { if (isPlainObject(p)) this.backend.apply('progress', id, p); }
     for (const [id, f] of Object.entries(data.folders || {})) { if (isPlainObject(f) && f.name && !this.getFolder(f.name)) this.backend.apply('folders', id, f); }
     return n;

@@ -69,6 +69,7 @@ const ICONS = {
   folderPlus: '<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M12 11v5M9.5 13.5h5"/>',
   home: '<path d="M4 11.2l8-6.7 8 6.7"/><path d="M6.5 9.5v10h11v-10"/>',
   folders: '<path d="M2.7 10a1.8 1.8 0 0 1 1.8-1.8h3.3l1.8 1.8h5.6a1.8 1.8 0 0 1 1.8 1.8v6.4a1.8 1.8 0 0 1-1.8 1.8H4.5a1.8 1.8 0 0 1-1.8-1.8z"/><path d="M6.5 7.5V6a1.8 1.8 0 0 1 1.8-1.8h3l1.8 1.8h5.6a1.8 1.8 0 0 1 1.8 1.8v6.7a1.8 1.8 0 0 1-1.8 1.8H17"/>',
+  sort: '<path d="M7 4.5v15M3.8 16.3L7 19.5l3.2-3.2M13 6.5h7.5M13 11.5h5.5M13 16.5h3.5"/>',
   move: '<path d="M3.5 7.5a2 2 0 0 1 2-2h4l2 2h7a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2h-13a2 2 0 0 1-2-2z"/><path d="M9 13.5h6M12.5 11l2.5 2.5-2.5 2.5"/>',
 };
 export function icon(name, size = 22, extra = {}) {
@@ -232,6 +233,18 @@ export function segmented(options, value, onChange, ariaLabel) {
   };
   render(value);
   return el;
+}
+
+/**
+ * Texte avec les lettres erronées en couleur (morceaux de util.js > answerDiff).
+ * 'bad' : lettre fausse ou en trop, 'miss' : repère de lettre manquante, 'fix' : bonne lettre dans la réponse attendue.
+ */
+export function diffText(segs, cls = '') {
+  return h('span', { class: ('diff ' + cls).trim() }, segs.map((s) => {
+    if (s.k === 'miss') return h('span', { class: 'd-miss', title: 'Lettre manquante' }, h('span', { class: 'sr-only' }, '(lettre manquante)'));
+    if (s.k === 'bad' || s.k === 'fix') return h('mark', { class: 'd-' + s.k }, s.t);
+    return s.t;
+  }));
 }
 
 export function hlbar(fraction, cls = '') {
