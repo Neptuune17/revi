@@ -360,6 +360,9 @@ a.chip:hover { background: color-mix(in srgb, var(--pen-soft) 70%, var(--pen) 30
 .sheet-row .term { font-weight: 650; }
 .sheet-row .def { border-left: 2px solid var(--margin); color: var(--ink-2); }
 .sheet-row .tools { display: flex; align-items: center; padding: 4px 4px 0 0; }
+.sheet-row .term, .sheet-row .def { display: flex; align-items: flex-start; gap: 4px; }
+.sheet-row .txt { flex: 1; min-width: 0; }
+.sheet-row .say { width: 32px; height: 32px; margin: -6px -8px -6px 0; }
 .status-dot { width: 9px; height: 9px; border-radius: 50%; display: inline-block; margin: 0 6px; flex: none; background: var(--track); border: 1px solid var(--line); }
 .status-dot.m1 { background: var(--hl-soft); border-color: transparent; }
 .status-dot.m2 { background: var(--hl-strong); border-color: transparent; }

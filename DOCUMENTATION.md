@@ -4,7 +4,7 @@ Révi est une appli de fiches de révision (cartes, Apprendre, Test, Associer) q
 
 Ce fichier sert à reprendre le projet plus tard, seul ou avec Claude : il décrit l'architecture, les données, les règles de chaque mode, la mise en ligne et le débogage.
 
-Version documentée : **1.4.1** (27 octobre 2026).
+Version documentée : **1.4.2** (27 octobre 2026).
 
 ---
 
@@ -317,6 +317,12 @@ service cloud.firestore {
 - Les résultats de recherche et la liste « Ranger ici » suivent aussi ce tri.
 - Code : `sortSets`, `sortFolders`, `sortControl` dans `home.js`.
 
+### Liste des cartes (page d'une série)
+
+- Chaque carte a un haut-parleur du côté du terme et un du côté de la définition. Chacun lit son côté dans sa propre langue (`termLang` ou `defLang`). Un côté sans langue n'a pas de haut-parleur.
+- Choix de la voix (`voiceFor` dans `util.js`) : la voix de la langue exacte (« en-GB »), sinon une voix de la même langue d'une autre région (« en-US »).
+- Si l'appareil n'a aucune voix pour la langue (`missingVoice`), le navigateur lirait avec une autre voix : un message le signale une fois par langue et par visite, et invite à installer la voix dans les réglages de l'appareil.
+
 ### Cartes
 
 - Clic, espace ou toucher pour retourner la carte.
@@ -556,6 +562,7 @@ python3 tests/gate_smoke.py
 
 ## 12. Historique des versions
 
+- **1.4.2** (27 octobre 2026) : liste des cartes, un haut-parleur de chaque côté (terme et définition), chacun dans sa langue ; choix de la voix plus précis ; message quand l'appareil n'a pas de voix pour la langue.
 - **1.4.1** (27 octobre 2026) : lituanien (`lt-LT`) ajouté aux langues de lecture à voix haute.
 - **1.4.0** (21 octobre 2026) : tri, lecture automatique, Associer plein écran, correction stricte.
   - Menu « Trier » à l'accueil et dans chaque dossier : nom, plus récentes, plus anciennes, dernière révision (par défaut). Un seul réglage pour toute l'appli, mémorisé sur l'appareil. Avec « Dernière révision », les dossiers suivent aussi ce tri (ils étaient toujours par nom avant).

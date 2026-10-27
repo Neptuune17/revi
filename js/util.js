@@ -306,6 +306,21 @@ export function unlockSpeech() {
   speechUnlocked = true;
   try { const u = new SpeechSynthesisUtterance(' '); u.volume = 0; window.speechSynthesis.speak(u); } catch { /* lecture indisponible */ }
 }
+const langTag = (l) => String(l || '').replace(/_/g, '-').toLowerCase();
+/** Voix de l'appareil pour une langue : d'abord la langue exacte (« en-GB »), sinon la même langue d'une autre région (« en-US »). */
+export function voiceFor(lang) {
+  if (!canSpeak() || !lang) return null;
+  try {
+    const want = langTag(lang), base = want.split('-')[0];
+    const voices = window.speechSynthesis.getVoices();
+    return voices.find((v) => langTag(v.lang) === want) || voices.find((v) => langTag(v.lang).split('-')[0] === base) || null;
+  } catch { return null; }
+}
+/** true si l'appareil a chargé ses voix et n'en a aucune pour cette langue (la lecture prendrait alors une autre voix). */
+export function missingVoice(lang) {
+  if (!canSpeak() || !lang) return false;
+  try { return window.speechSynthesis.getVoices().length > 0 && !voiceFor(lang); } catch { return false; }
+}
 /** Lit un texte dans la langue donnée, sans ce qui est entre parenthèses. Coupe la lecture en cours. */
 export function speak(text, lang) {
   if (!canSpeak() || !lang) return;
@@ -313,7 +328,7 @@ export function speak(text, lang) {
     window.speechSynthesis.cancel();
     const u = new SpeechSynthesisUtterance(stripParens(text));
     u.lang = lang;
-    const voice = window.speechSynthesis.getVoices().find((v) => v.lang && v.lang.toLowerCase().startsWith(lang.slice(0, 2).toLowerCase()));
+    const voice = voiceFor(lang);
     if (voice) u.voice = voice;
     window.speechSynthesis.speak(u);
   } catch { /* lecture indisponible */ }
