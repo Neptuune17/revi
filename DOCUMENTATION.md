@@ -4,7 +4,7 @@ Révi est une appli de fiches de révision (cartes, Apprendre, Test, Associer) q
 
 Ce fichier sert à reprendre le projet plus tard, seul ou avec Claude : il décrit l'architecture, les données, les règles de chaque mode, la mise en ligne et le débogage.
 
-Version documentée : **1.4.0** (21 octobre 2026).
+Version documentée : **1.4.1** (27 octobre 2026).
 
 ---
 
@@ -556,6 +556,7 @@ python3 tests/gate_smoke.py
 
 ## 12. Historique des versions
 
+- **1.4.1** (27 octobre 2026) : lituanien (`lt-LT`) ajouté aux langues de lecture à voix haute.
 - **1.4.0** (21 octobre 2026) : tri, lecture automatique, Associer plein écran, correction stricte.
   - Menu « Trier » à l'accueil et dans chaque dossier : nom, plus récentes, plus anciennes, dernière révision (par défaut). Un seul réglage pour toute l'appli, mémorisé sur l'appareil. Avec « Dernière révision », les dossiers suivent aussi ce tri (ils étaient toujours par nom avant).
   - Les dossiers renommés ou déplacés gardent leur date de création ; un dossier sans document prend celle de son contenu. Une série importée sans date en reçoit une.

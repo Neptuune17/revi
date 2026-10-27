@@ -1,7 +1,7 @@
 // Service worker de Révi : met l'appli en cache pour qu'elle s'ouvre et fonctionne hors ligne.
 // IMPORTANT : à chaque nouvelle mise en ligne, changer CACHE_VERSION (et APP_VERSION dans js/version.js).
 // Si vous ajoutez un fichier à l'appli, ajoutez-le aussi à la liste FILES ci-dessous.
-const CACHE_VERSION = '1.4.0';
+const CACHE_VERSION = '1.4.1';
 const CACHE = 'revi-' + CACHE_VERSION;
 const FILES = [
   './',

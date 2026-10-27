@@ -292,7 +292,7 @@ export class ActiveTimer {
 // ---------- Lecture à voix haute ----------
 export const LANGS = [
   ['', 'Aucune'], ['fr-FR', 'Français'], ['en-GB', 'Anglais (UK)'], ['en-US', 'Anglais (US)'], ['es-ES', 'Espagnol'],
-  ['de-DE', 'Allemand'], ['it-IT', 'Italien'], ['pt-PT', 'Portugais'], ['nl-NL', 'Néerlandais'], ['zh-CN', 'Chinois'], ['ja-JP', 'Japonais'], ['ar', 'Arabe'],
+  ['de-DE', 'Allemand'], ['it-IT', 'Italien'], ['pt-PT', 'Portugais'], ['nl-NL', 'Néerlandais'], ['lt-LT', 'Lituanien'], ['zh-CN', 'Chinois'], ['ja-JP', 'Japonais'], ['ar', 'Arabe'],
 ];
 export const canSpeak = () => typeof window !== 'undefined' && 'speechSynthesis' in window;
 let speechUnlocked = false;
