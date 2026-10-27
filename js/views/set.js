@@ -2,7 +2,7 @@
 import { h, setChildren, add, icon, menuButton, confirmDialog, toast } from '../ui.js';
 import { store, folderKey, displayPath } from '../store.js';
 import { folderPath, pickFolder } from './home.js';
-import { plural, pct, fmtSeconds, fmtDuration, fmtRelative, toExportText, copyText, downloadFile, speak, canSpeak } from '../util.js';
+import { plural, pct, fmtSeconds, fmtDuration, fmtRelative, toExportText, copyText, downloadFile, speak, canSpeak, missingVoice, LANGS } from '../util.js';
 
 const MODES = [
   ['cards', 'cards', 'Cartes', 'Retourner et trier'],
@@ -104,17 +104,33 @@ export function setView(ctx) {
       shown.length ? h('div', { class: 'sheet' }, shown.map((c) => {
         const st = store.statusOf(id, c.id);
         return h('div', { class: 'sheet-row' },
-          h('div', { class: 'term' }, c.term),
-          h('div', { class: 'def' }, c.definition),
+          h('div', { class: 'term' }, h('span', { class: 'txt' }, c.term), speakBtn(c.term, set.termLang, 'le terme')),
+          h('div', { class: 'def' }, h('span', { class: 'txt' }, c.definition), speakBtn(c.definition, set.defLang, 'la définition')),
           h('div', { class: 'tools' },
             h('span', { class: `status-dot m${st}`, title: STATUS_LABEL[st], role: 'img', 'aria-label': STATUS_LABEL[st] }),
-            canSpeak() && (set.termLang || set.defLang) ? h('button', { class: 'icon-btn', 'aria-label': 'Écouter', onclick: () => speak(set.termLang ? c.term : c.definition, set.termLang || set.defLang) }, icon('speaker', 19)) : null,
             h('button', { class: 'icon-btn' + (c.starred ? ' on' : ''), 'aria-label': c.starred ? 'Retirer l’étoile' : 'Ajouter une étoile', 'aria-pressed': String(c.starred), onclick: () => store.toggleStar(id, c.id) }, icon(c.starred ? 'starFill' : 'star', 20))));
       })) : h('p', { class: 'muted' }, cards.length ? 'Aucune carte étoilée.' : 'Cette série est vide. Ajoutez des cartes avec « Modifier ».'));
 
     setChildren(ctx.main, head, modes, progress, stats, list);
   };
   ctx.watch(render);
+}
+
+// Haut-parleur d'un côté de la carte : lit ce côté dans sa propre langue (rien si la langue n'est pas choisie).
+const warnedLangs = new Set();
+const langName = (code) => ((LANGS.find(([c]) => c === code) || [, code])[1] || code).replace(/\s*\(.*\)/, '').toLowerCase();
+function speakBtn(text, lang, what) {
+  if (!canSpeak() || !lang || !String(text || '').trim()) return null;
+  return h('button', {
+    class: 'icon-btn say', 'aria-label': `Écouter ${what}`, title: `Écouter ${what}`,
+    onclick: () => {
+      speak(text, lang);
+      if (missingVoice(lang) && !warnedLangs.has(lang)) {
+        warnedLangs.add(lang);
+        toast(`Aucune voix en ${langName(lang)} sur cet appareil : la prononciation risque d'être fausse. Ajoutez cette voix dans les réglages de l'appareil (Langue / Synthèse vocale).`, { timeout: 7000 });
+      }
+    },
+  }, icon('speaker', 18));
 }
 
 const figure = (v, k) => h('div', { class: 'figure' }, h('div', { class: 'v' }, v), h('div', { class: 'k' }, k));

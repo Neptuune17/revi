@@ -114,8 +114,31 @@ def voice_checks(p):
     auto.check(); page.wait_for_timeout(150)
     reset(); page.get_by_role("button", name="Définition").click(); page.wait_for_timeout(500)
     check(spoken()[-1:] == [["être", "fr-FR"]], f"[voix] face visible « Définition » : la lecture suit la face affichée ({spoken()})")
+    # Page de la série : un haut-parleur de chaque côté, chacun dans sa langue
+    page.goto(URL + f"#/set/{sid}"); page.wait_for_timeout(400)
+    row = page.locator(".sheet-row").first
+    check(row.locator(".term .say").count() == 1 and row.locator(".def .say").count() == 1 and row.locator(".tools .say").count() == 0,
+          "[voix] liste des cartes : un haut-parleur côté terme et un côté définition")
+    reset(); row.locator(".term .say").click(); page.wait_for_timeout(150)
+    check(spoken() == [["sein", "de-DE"]], f"[voix] liste : le haut-parleur du terme lit le terme en allemand ({spoken()})")
+    reset(); row.locator(".def .say").click(); page.wait_for_timeout(150)
+    check(spoken() == [["être", "fr-FR"]], f"[voix] liste : le haut-parleur de la définition lit la définition en français ({spoken()})")
+    page.screenshot(path=f"{SHOTS}/v-set-speakers.png")
+    sid3 = page.evaluate("() => revi.store.createSet({ title: 'Lituanien', termLang: '', defLang: 'lt-LT', cards: [{ term: 'bonjour', definition: 'labas' }] })")
+    page.goto(URL + f"#/set/{sid3}"); page.wait_for_timeout(400)
+    row = page.locator(".sheet-row").first
+    check(row.locator(".term .say").count() == 0 and row.locator(".def .say").count() == 1, "[voix] liste : pas de haut-parleur du côté sans langue")
+    reset(); row.locator(".def .say").click(); page.wait_for_timeout(150)
+    check(spoken() == [["labas", "lt-LT"]], f"[voix] liste : la définition est lue en lituanien ({spoken()})")
+    # Choix de la voix : langue exacte d'abord, sinon même langue d'une autre région ; alerte si aucune voix
+    pick = page.evaluate("""async () => { const u = await import('./js/util.js');
+      const vs = [{ lang: 'en-US', name: 'us' }, { lang: 'en_GB', name: 'gb' }, { lang: 'fr-CA', name: 'ca' }];
+      const old = speechSynthesis.getVoices; speechSynthesis.getVoices = () => vs;
+      const r = [u.voiceFor('en-GB')?.name, u.voiceFor('fr-FR')?.name, u.voiceFor('lt-LT'), u.missingVoice('lt-LT'), u.missingVoice('fr-FR')];
+      speechSynthesis.getVoices = old; return r; }""")
+    check(pick == ["gb", "ca", None, True, False], f"[voix] choix de la voix selon la langue ({pick})")
     # Série sans langue : option grisée, rien n'est lu
-    sid2 = page.evaluate("() => revi.store.createSet({ title: 'Muette', cards: [{ term: 'a', definition: 'b' }] })")
+    sid2 =page.evaluate("() => revi.store.createSet({ title: 'Muette', cards: [{ term: 'a', definition: 'b' }] })")
     reset(); page.goto(URL + f"#/set/{sid2}/cards"); page.wait_for_timeout(400)
     page.locator(".flip").click(); page.wait_for_timeout(800)
     page.locator("details.options summary").click(); page.wait_for_timeout(150)
