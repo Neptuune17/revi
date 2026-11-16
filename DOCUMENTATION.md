@@ -4,7 +4,7 @@ Révi est une appli de fiches de révision (cartes, Apprendre, Test, Associer) q
 
 Ce fichier sert à reprendre le projet plus tard, seul ou avec Claude : il décrit l'architecture, les données, les règles de chaque mode, la mise en ligne et le débogage.
 
-Version documentée : **1.4.2** (27 octobre 2026).
+Version documentée : **1.4.3** (16 novembre 2026).
 
 ---
 
@@ -524,6 +524,7 @@ Le dossier `tests/` contient des scripts Playwright (Python) :
   - les notes et la progression ;
   - la correction stricte (`grade` testée dans le navigateur, lettres erronées) ;
   - la lecture automatique du mode Cartes (avec une fausse synthèse vocale qui enregistre les appels) ;
+  - la voix manquante (rien n'est lu avec une autre voix, message et aide « Que faire ? ») ;
   - la grille d'Associer (pas de défilement, colonnes, tuiles qui ne bougent pas) ;
   - le tri des dossiers et des séries (chaque option, à l'accueil et dans un dossier, après rechargement et après un renommage) ;
   - l'import ;
