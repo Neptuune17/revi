@@ -99,7 +99,11 @@ def missing_voice_checks(p):
     page.get_by_role("button", name="Que faire ?").click(); page.wait_for_timeout(200)
     dlg = page.locator("dialog.modal")
     check(dlg.count() == 1 and "Ajouter une voix en lituanien" in dlg.inner_text(), "[voix manquante] « Que faire ? » ouvre l'aide")
+    check("Moteur préféré" in dlg.inner_text() and "Redémarrez le téléphone" in dlg.inner_text(), "[voix manquante] aide : onglet Android ouvert par défaut hors iPhone")
     page.screenshot(path=f"{SHOTS}/v-missing-voice-help.png")
+    dlg.get_by_role("button", name="iPhone").click(); page.wait_for_timeout(100)
+    check("Lire et énoncer" in dlg.inner_text() and "Moteur préféré" not in dlg.inner_text(), "[voix manquante] aide : l'onglet iPhone affiche les étapes iPhone")
+    page.screenshot(path=f"{SHOTS}/v-missing-voice-help-ios.png")
     dlg.get_by_role("button", name="OK").click(); page.wait_for_timeout(150)
     row = page.locator(".sheet-row").first
     row.locator(".def .say").click(); page.wait_for_timeout(500)

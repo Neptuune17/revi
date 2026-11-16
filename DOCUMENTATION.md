@@ -4,7 +4,7 @@ Révi est une appli de fiches de révision (cartes, Apprendre, Test, Associer) q
 
 Ce fichier sert à reprendre le projet plus tard, seul ou avec Claude : il décrit l'architecture, les données, les règles de chaque mode, la mise en ligne et le débogage.
 
-Version documentée : **1.4.3** (16 novembre 2026).
+Version documentée : **1.4.4** (16 novembre 2026).
 
 ---
 
@@ -323,7 +323,10 @@ service cloud.firestore {
 - Choix de la voix (`voiceFor` dans `util.js`) : la voix de la langue exacte (« en-GB »), sinon une voix de la même langue d'une autre région (« en-US »).
 - Voix manquante : si l'appareil n'a aucune voix pour la langue (`missingVoice`), le navigateur lirait avec une autre voix (souvent la française). `speak` ne lit alors rien et renvoie `false`.
   - Un message le signale (`warnMissingVoices` dans `ui.js`) : à l'ouverture d'une série ou du mode Cartes, une fois par langue et par visite ; à nouveau à chaque toucher d'un haut-parleur concerné et au choix de la langue dans l'éditeur.
-  - Bouton « Que faire ? » : aide selon l'appareil (iPhone, Android, ordinateur). Lituanien : sur iPhone, voix à télécharger (iOS 18 ou plus récent) ; sur Android, données vocales du moteur, sinon l'appli Ingutė ; sur ordinateur, Microsoft Edge.
+  - Bouton « Que faire ? » (`voiceHelp` dans `ui.js`) : deux onglets, **Android** et **iPhone**, ouverts sur celui de l'appareil, plus une ligne pour l'ordinateur (Microsoft Edge).
+    - Android : Paramètres > Synthèse vocale > moteur préféré **Google** (le moteur Samsung n'a pas le lituanien) > engrenage > « Installer les données vocales » > la langue ; à défaut pour le lituanien, l'appli Ingutė.
+    - iPhone : Réglages > Accessibilité > Lire et énoncer > Voix > télécharger la voix (lituanien : iOS 18 ou plus récent).
+    - Dans les deux cas : **redémarrer le téléphone**. Vérifié sur un Samsung : sans redémarrage, le navigateur garde l'ancienne liste de voix et Révi ne voit pas la nouvelle.
   - Les voix se chargent après coup sur Chrome et Safari : `voicesLoaded()` attend la liste (1,5 s au plus). Si l'appareil n'annonce aucune voix, rien n'est signalé et la lecture se fait comme avant.
 
 ### Cartes
@@ -566,6 +569,7 @@ python3 tests/gate_smoke.py
 
 ## 12. Historique des versions
 
+- **1.4.4** (16 novembre 2026) : aide « Que faire ? » en deux onglets, Android et iPhone, avec les étapes vérifiées sur un Samsung (moteur Google, données vocales, redémarrage).
 - **1.4.3** (16 novembre 2026) : voix manquante sur l'appareil : la langue n'est plus lue avec une autre voix (le lituanien était lu à la française) ; message à l'ouverture de la série et du mode Cartes, et au choix de la langue dans l'éditeur, avec une aide « Que faire ? » selon l'appareil.
 - **1.4.2** (27 octobre 2026) : liste des cartes, un haut-parleur de chaque côté (terme et définition), chacun dans sa langue ; choix de la voix plus précis ; message quand l'appareil n'a pas de voix pour la langue.
 - **1.4.1** (27 octobre 2026) : lituanien (`lt-LT`) ajouté aux langues de lecture à voix haute.

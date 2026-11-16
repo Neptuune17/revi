@@ -115,22 +115,39 @@ export async function warnMissingVoices(langs, { again = false } = {}) {
   toast(`Pas de voix en ${joinLangs(missing.map(langName))} sur cet appareil : ces cartes ne seront pas lues à voix haute.`,
     { timeout: 9000, action: 'Que faire ?', onAction: () => voiceHelp(missing) });
 }
+// Aide « Que faire ? » : deux onglets, Android et iPhone, ouverts sur celui de l'appareil.
 function voiceHelp(langs) {
   const ua = navigator.userAgent || '';
   const ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
-  const android = /Android/.test(ua);
   const names = joinLangs(langs.map(langName));
-  const steps = ios
-    ? ['Réglages > Accessibilité > Lire et énoncer (ou Contenu énoncé) > Voix : choisissez « ' + names + ' » et téléchargez une voix. Ajouter la langue du téléphone ne suffit pas : il faut la voix.',
-      'Puis fermez et rouvrez Révi. Si la langue n’est pas dans la liste, mettez l’iPhone à jour : certaines langues, comme le lituanien, ne sont arrivées que récemment (iOS 18).']
-    : android
-      ? ['Réglages > Accessibilité (ou Langue) > Synthèse vocale : dans le moteur utilisé (souvent Google), touchez l’engrenage puis « Installer les données vocales » et téléchargez la langue si elle est proposée. Ajouter la langue du téléphone ne suffit pas : il faut la voix.',
-        langs.includes('lt-LT') ? 'Si le lituanien n’y est pas : l’appli gratuite Ingutė (github.com/RobertasTa/android-lt), puis choisissez-la comme moteur.' : null,
-        'Fermez puis rouvrez Révi pour qu’il trouve la nouvelle voix.']
-      : ['Installez une voix en ' + names + ' dans les réglages de l’ordinateur (Langue, Voix ou Synthèse vocale), puis rouvrez le navigateur.',
-        'Ou utilisez Microsoft Edge : il propose des voix en ligne pour beaucoup de langues, dont le lituanien.'];
+  const lt = langs.includes('lt-LT');
+  const step = (...parts) => h('li', { style: { marginBottom: '6px' } }, ...parts);
+  const note = (t) => h('p', { class: 'small muted', style: { margin: 0 } }, t);
+  const list = (...items) => h('ol', { style: { margin: 0, paddingLeft: '20px' } }, ...items);
+  const guides = {
+    android: () => [
+      list(
+        step('Paramètres : tapez « synthèse » dans la recherche, puis ouvrez « Synthèse vocale ».'),
+        step('Moteur préféré : choisissez Google (« Services de reconnaissance et de synthèse vocale de Google »), à installer depuis le Play Store s’il manque.' + (lt ? ' Le moteur Samsung n’a pas le lituanien.' : '')),
+        step('Engrenage à côté du moteur Google > « Installer les données vocales » > ' + names + '.'),
+        step(h('strong', null, 'Redémarrez le téléphone'), ', sinon Révi ne voit pas la nouvelle voix.')),
+      lt ? note('Lituanien absent chez Google : l’appli gratuite Ingutė (github.com/RobertasTa/android-lt).') : null,
+    ],
+    ios: () => [
+      list(
+        step('Réglages > Accessibilité > Lire et énoncer (ou « Contenu énoncé ») > Voix.'),
+        step('Choisissez ' + names + ' et téléchargez une voix. Ajouter la langue dans « Langue et région » ne suffit pas.'),
+        step(h('strong', null, 'Redémarrez l’iPhone'), ', sinon Révi ne voit pas la nouvelle voix.')),
+      note('Langue absente de la liste : mettez l’iPhone à jour' + (lt ? ' (lituanien : iOS 18 ou plus récent)' : '') + ', ou écoutez ces cartes sur un autre appareil.'),
+    ],
+  };
+  const body = h('div', { class: 'muted', style: { display: 'grid', gap: '8px' } });
+  const show = (k) => setChildren(body, guides[k]());
+  const tabs = segmented([['android', 'Android'], ['ios', 'iPhone']], ios ? 'ios' : 'android', show, 'Type de téléphone');
+  show(ios ? 'ios' : 'android');
   confirmDialog({ title: `Ajouter une voix en ${names}`, confirm: 'OK', cancel: null,
-    body: h('div', { class: 'muted' }, steps.filter(Boolean).map((t) => h('p', { style: { margin: '0 0 10px' } }, t))) });
+    body: h('div', { style: { display: 'grid', gap: '14px' } }, tabs, body,
+      note('Sur ordinateur : installez la voix dans les réglages du système, ou utilisez Microsoft Edge.')) });
 }
 
 // ---------- Dialogues ----------
