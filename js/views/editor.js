@@ -1,5 +1,5 @@
 // Création et modification d'une série, avec import de texte (export Quizlet, tableur...).
-import { h, setChildren, add, icon, toast, confirmDialog, autoGrow } from '../ui.js';
+import { h, setChildren, add, icon, toast, confirmDialog, autoGrow, warnMissingVoices } from '../ui.js';
 import { store, inputPath, joinPath } from '../store.js';
 import { folderPath } from './home.js';
 import { LANGS, detectSeparators, parseImport, plural } from '../util.js';
@@ -25,7 +25,7 @@ export function editorView(ctx) {
   // Un sous-dossier s'écrit avec « / » : « Allemand / Verbes ».
   const folder = h('input', { class: 'input', value: inputPath(set ? store.canonicalFolder(set.folder) : fromFolder), placeholder: 'Aucun (ex. : Anglais)', list: 'folders-list', maxlength: 200, oninput: markDirty });
   const folders = h('datalist', { id: 'folders-list' }, store.folders().map((f) => h('option', { value: inputPath(f) })));
-  const langSelect = (val) => h('select', { class: 'select', onchange: markDirty }, LANGS.map(([v, l]) => h('option', { value: v, selected: v === (val || '') }, l)));
+  const langSelect = (val) => h('select', { class: 'select', onchange: (e) => { markDirty(); warnMissingVoices([e.target.value], { again: true }); } }, LANGS.map(([v, l]) => h('option', { value: v, selected: v === (val || '') }, l)));
   const termLang = langSelect(set?.termLang);
   const defLang = langSelect(set?.defLang);
 

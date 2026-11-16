@@ -1,8 +1,8 @@
 // Page d'une série : modes d'étude, progression, statistiques, liste des cartes.
-import { h, setChildren, add, icon, menuButton, confirmDialog, toast } from '../ui.js';
+import { h, setChildren, add, icon, menuButton, confirmDialog, toast, warnMissingVoices } from '../ui.js';
 import { store, folderKey, displayPath } from '../store.js';
 import { folderPath, pickFolder } from './home.js';
-import { plural, pct, fmtSeconds, fmtDuration, fmtRelative, toExportText, copyText, downloadFile, speak, canSpeak, missingVoice, LANGS } from '../util.js';
+import { plural, pct, fmtSeconds, fmtDuration, fmtRelative, toExportText, copyText, downloadFile, speak, canSpeak } from '../util.js';
 
 const MODES = [
   ['cards', 'cards', 'Cartes', 'Retourner et trier'],
@@ -114,22 +114,17 @@ export function setView(ctx) {
     setChildren(ctx.main, head, modes, progress, stats, list);
   };
   ctx.watch(render);
+  // Langue de la série sans voix sur l'appareil : prévenir dès l'ouverture (une fois par langue et par visite).
+  const opened = store.getSet(id);
+  if (opened) warnMissingVoices([opened.termLang, opened.defLang]);
 }
 
 // Haut-parleur d'un côté de la carte : lit ce côté dans sa propre langue (rien si la langue n'est pas choisie).
-const warnedLangs = new Set();
-const langName = (code) => ((LANGS.find(([c]) => c === code) || [, code])[1] || code).replace(/\s*\(.*\)/, '').toLowerCase();
 function speakBtn(text, lang, what) {
   if (!canSpeak() || !lang || !String(text || '').trim()) return null;
   return h('button', {
     class: 'icon-btn say', 'aria-label': `Écouter ${what}`, title: `Écouter ${what}`,
-    onclick: () => {
-      speak(text, lang);
-      if (missingVoice(lang) && !warnedLangs.has(lang)) {
-        warnedLangs.add(lang);
-        toast(`Aucune voix en ${langName(lang)} sur cet appareil : la prononciation risque d'être fausse. Ajoutez cette voix dans les réglages de l'appareil (Langue / Synthèse vocale).`, { timeout: 7000 });
-      }
-    },
+    onclick: () => { if (!speak(text, lang)) warnMissingVoices([lang], { again: true }); },
   }, icon('speaker', 18));
 }
 

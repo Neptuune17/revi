@@ -83,6 +83,37 @@ Object.defineProperty(window, 'speechSynthesis', { configurable: true, get: () =
 if (!window.SpeechSynthesisUtterance) window.SpeechSynthesisUtterance = class { constructor(t) { this.text = t; } };
 """
 
+def missing_voice_checks(p):
+    """Appareil sans voix lituanienne : rien n'est lu (une autre voix prononcerait faux) et un message le signale."""
+    # Fausses voix (objets simples) : il faut aussi une fausse phrase, la vraie refuse une voix qui n'est pas une SpeechSynthesisVoice.
+    init = FAKE_SPEECH.replace("getVoices() { return []; }", "getVoices() { return [{ lang: 'fr-FR', name: 'fr' }, { lang: 'de-DE', name: 'de' }]; }") \
+        + "window.SpeechSynthesisUtterance = class { constructor(t) { this.text = t; } };"
+    b, page, errors = new_page(p, init_script=init)
+    spoken = lambda: page.evaluate("window.__spoken.filter(s => s.text.trim()).map(s => [s.text.trim(), s.lang])")
+    toasts = lambda: page.locator(".toast .msg").all_inner_texts()
+    sid = page.evaluate("() => revi.store.createSet({ title: 'Lituanien', termLang: 'fr-FR', defLang: 'lt-LT', cards: [{ term: 'bonjour', definition: 'labas' }] })")
+    page.goto(URL + f"#/set/{sid}"); page.wait_for_timeout(500)
+    warn = [t for t in toasts() if "Pas de voix en lituanien" in t]
+    check(len(warn) == 1, f"[voix manquante] message à l'ouverture de la série ({toasts()})")
+    page.screenshot(path=f"{SHOTS}/v-missing-voice.png")
+    page.get_by_role("button", name="Que faire ?").click(); page.wait_for_timeout(200)
+    dlg = page.locator("dialog.modal")
+    check(dlg.count() == 1 and "Ajouter une voix en lituanien" in dlg.inner_text(), "[voix manquante] « Que faire ? » ouvre l'aide")
+    page.screenshot(path=f"{SHOTS}/v-missing-voice-help.png")
+    dlg.get_by_role("button", name="OK").click(); page.wait_for_timeout(150)
+    row = page.locator(".sheet-row").first
+    row.locator(".def .say").click(); page.wait_for_timeout(500)
+    check(spoken() == [], f"[voix manquante] le haut-parleur ne lit pas le lituanien avec une autre voix ({spoken()})")
+    check(any("Pas de voix en lituanien" in t for t in toasts()), "[voix manquante] toucher le haut-parleur rappelle le message")
+    page.evaluate("window.__spoken = []")
+    row.locator(".term .say").click(); page.wait_for_timeout(150)
+    check(spoken() == [["bonjour", "fr-FR"]], f"[voix manquante] l'autre côté (français) est toujours lu ({spoken()})")
+    page.goto(URL + f"#/set/{sid}/cards"); page.wait_for_timeout(400)
+    page.evaluate("window.__spoken = []"); page.locator(".flip").click(); page.wait_for_timeout(900)
+    check(spoken() == [], f"[voix manquante] mode Cartes : la face en lituanien n'est pas lue ({spoken()})")
+    check(not errors, "[voix manquante] aucune erreur JavaScript" + ("" if not errors else ": " + " | ".join(errors[:5])))
+    b.close()
+
 def voice_checks(p):
     """Lecture automatique du mode Cartes (idée 2), avec une fausse synthèse vocale qui enregistre les appels."""
     b, page, errors = new_page(p, init_script=FAKE_SPEECH)
@@ -551,6 +582,7 @@ def run(p, label, viewport, mobile, dark=False):
 with sync_playwright() as p:
     grade_checks(p)
     voice_checks(p)
+    missing_voice_checks(p)
     small_match_checks(p)
     sort_checks(p, {"width": 390, "height": 844}, True)
     run(p, "m", {"width": 390, "height": 844}, True)

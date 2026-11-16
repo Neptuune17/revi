@@ -54,7 +54,7 @@ Après une modification du code, avant de remettre l'appli en ligne : **changer 
 | `js/main.js` | Démarrage, routeur, barre du haut, connexion Firebase, migration local vers compte, service worker, journal d'erreurs. |
 | `js/store.js` | Magasin de données central (`store`) et `LocalBackend` (localStorage). Toutes les lectures et écritures passent par lui. |
 | `js/cloud.js` | `CloudBackend` (Firestore) et fonctions de connexion (Google, email). Chargé seulement si Firebase est configuré. |
-| `js/util.js` | Outils : sentinelles `DELETE`/`inc`, fusion profonde, correction des réponses (`grade`) et repérage des lettres erronées (`answerDiff`), import de texte, formats français, minuteur, voix (`speak`, `unlockSpeech`), stockage sûr. |
+| `js/util.js` | Outils : sentinelles `DELETE`/`inc`, fusion profonde, correction des réponses (`grade`) et repérage des lettres erronées (`answerDiff`), import de texte, formats français, minuteur, voix (`speak`, `unlockSpeech`, `voicesLoaded`, `missingVoice`), stockage sûr. |
 | `js/ui.js` | Création d'éléments `h()`, `setChildren()`, `add()`, icônes SVG, toasts, dialogues (`confirmDialog`, `promptDialog`, `checklistDialog` avec intertitres, `choiceDialog` à choix unique), menus, contrôles segmentés, `diffText()` (lettres erronées en couleur). |
 | `js/version.js` | `APP_VERSION`. |
 | `js/sample.js` | Série d'exemple (connecteurs logiques en anglais). |
@@ -321,7 +321,10 @@ service cloud.firestore {
 
 - Chaque carte a un haut-parleur du côté du terme et un du côté de la définition. Chacun lit son côté dans sa propre langue (`termLang` ou `defLang`). Un côté sans langue n'a pas de haut-parleur.
 - Choix de la voix (`voiceFor` dans `util.js`) : la voix de la langue exacte (« en-GB »), sinon une voix de la même langue d'une autre région (« en-US »).
-- Si l'appareil n'a aucune voix pour la langue (`missingVoice`), le navigateur lirait avec une autre voix : un message le signale une fois par langue et par visite, et invite à installer la voix dans les réglages de l'appareil.
+- Voix manquante : si l'appareil n'a aucune voix pour la langue (`missingVoice`), le navigateur lirait avec une autre voix (souvent la française). `speak` ne lit alors rien et renvoie `false`.
+  - Un message le signale (`warnMissingVoices` dans `ui.js`) : à l'ouverture d'une série ou du mode Cartes, une fois par langue et par visite ; à nouveau à chaque toucher d'un haut-parleur concerné et au choix de la langue dans l'éditeur.
+  - Bouton « Que faire ? » : aide selon l'appareil (iPhone, Android, ordinateur). Lituanien : sur iPhone, voix à télécharger (iOS 18 ou plus récent) ; sur Android, données vocales du moteur, sinon l'appli Ingutė ; sur ordinateur, Microsoft Edge.
+  - Les voix se chargent après coup sur Chrome et Safari : `voicesLoaded()` attend la liste (1,5 s au plus). Si l'appareil n'annonce aucune voix, rien n'est signalé et la lecture se fait comme avant.
 
 ### Cartes
 
@@ -556,12 +559,13 @@ python3 tests/gate_smoke.py
 - **Dossiers** : pas de glisser-déposer pour ranger (menu « Ranger ici » ou « Déplacer »). Un dossier modifié simultanément hors ligne sur deux appareils (ex. renommé sur l'un, déplacé sur l'autre) peut se retrouver en double : il suffit de déplacer ou supprimer le doublon.
 - La déconnexion ne vide pas le cache Firestore de l'appareil (pensé pour des appareils personnels).
 - **Tri** : réglage propre à chaque appareil (pas synchronisé). Une version synchronisée serait possible via un document `users/{uid}/prefs`, déjà couvert par les règles.
-- **Lecture à voix haute** : la qualité dépend des voix installées sur l'appareil ; certaines langues peuvent manquer.
+- **Lecture à voix haute** : la qualité dépend des voix installées sur l'appareil ; certaines langues peuvent manquer ou être à télécharger (le lituanien, par exemple). Elles ne sont alors pas lues, avec un message. Idée : un service de synthèse en ligne (Google Cloud, Azure) via une Cloud Function, pour les langues absentes de l'appareil.
 
 ---
 
 ## 12. Historique des versions
 
+- **1.4.3** (16 novembre 2026) : voix manquante sur l'appareil : la langue n'est plus lue avec une autre voix (le lituanien était lu à la française) ; message à l'ouverture de la série et du mode Cartes, et au choix de la langue dans l'éditeur, avec une aide « Que faire ? » selon l'appareil.
 - **1.4.2** (27 octobre 2026) : liste des cartes, un haut-parleur de chaque côté (terme et définition), chacun dans sa langue ; choix de la voix plus précis ; message quand l'appareil n'a pas de voix pour la langue.
 - **1.4.1** (27 octobre 2026) : lituanien (`lt-LT`) ajouté aux langues de lecture à voix haute.
 - **1.4.0** (21 octobre 2026) : tri, lecture automatique, Associer plein écran, correction stricte.

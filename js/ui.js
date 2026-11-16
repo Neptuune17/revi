@@ -1,4 +1,5 @@
 // Petits outils d'interface : création d'éléments (h), icônes SVG, toasts, dialogues, menus.
+import { canSpeak, voicesLoaded, missingVoice, langName } from './util.js';
 
 /**
  * h('button', { class: 'btn', onclick: fn, disabled: true }, 'Texte', autreNoeud)
@@ -95,6 +96,43 @@ export function toast(message, { action, onAction, timeout = 3600, kind } = {}) 
   return close;
 }
 
+// ---------- Voix manquante ----------
+// Sans voix pour une langue, le navigateur lirait avec une autre voix (souvent la française) : la lecture est
+// coupée (speak) et un message le signale, une fois par langue et par visite, avec un bouton « Que faire ? ».
+const warnedVoices = new Set();
+const joinLangs = (names) => names.length < 2 ? names[0] : `${names.slice(0, -1).join(', ')} ni en ${names[names.length - 1]}`;
+/**
+ * Signale les langues sans voix sur l'appareil. `again` : même si déjà signalé (toucher d'un haut-parleur, choix dans l'éditeur).
+ * Attend le chargement des voix ; si l'appareil n'annonce aucune voix, on ne peut rien dire et rien n'est affiché.
+ */
+export async function warnMissingVoices(langs, { again = false } = {}) {
+  if (!canSpeak()) return;
+  const todo = [...new Set((langs || []).filter(Boolean))].filter((l) => again || !warnedVoices.has(l));
+  if (!todo.length || !(await voicesLoaded())) return;
+  const missing = todo.filter((l) => missingVoice(l));
+  if (!missing.length) return;
+  missing.forEach((l) => warnedVoices.add(l));
+  toast(`Pas de voix en ${joinLangs(missing.map(langName))} sur cet appareil : ces cartes ne seront pas lues à voix haute.`,
+    { timeout: 9000, action: 'Que faire ?', onAction: () => voiceHelp(missing) });
+}
+function voiceHelp(langs) {
+  const ua = navigator.userAgent || '';
+  const ios = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+  const android = /Android/.test(ua);
+  const names = joinLangs(langs.map(langName));
+  const steps = ios
+    ? ['Réglages > Accessibilité > Lire et énoncer (ou Contenu énoncé) > Voix : choisissez « ' + names + ' » et téléchargez une voix. Ajouter la langue du téléphone ne suffit pas : il faut la voix.',
+      'Puis fermez et rouvrez Révi. Si la langue n’est pas dans la liste, mettez l’iPhone à jour : certaines langues, comme le lituanien, ne sont arrivées que récemment (iOS 18).']
+    : android
+      ? ['Réglages > Accessibilité (ou Langue) > Synthèse vocale : dans le moteur utilisé (souvent Google), touchez l’engrenage puis « Installer les données vocales » et téléchargez la langue si elle est proposée. Ajouter la langue du téléphone ne suffit pas : il faut la voix.',
+        langs.includes('lt-LT') ? 'Si le lituanien n’y est pas : l’appli gratuite Ingutė (github.com/RobertasTa/android-lt), puis choisissez-la comme moteur.' : null,
+        'Fermez puis rouvrez Révi pour qu’il trouve la nouvelle voix.']
+      : ['Installez une voix en ' + names + ' dans les réglages de l’ordinateur (Langue, Voix ou Synthèse vocale), puis rouvrez le navigateur.',
+        'Ou utilisez Microsoft Edge : il propose des voix en ligne pour beaucoup de langues, dont le lituanien.'];
+  confirmDialog({ title: `Ajouter une voix en ${names}`, confirm: 'OK', cancel: null,
+    body: h('div', { class: 'muted' }, steps.filter(Boolean).map((t) => h('p', { style: { margin: '0 0 10px' } }, t))) });
+}
+
 // ---------- Dialogues ----------
 export function confirmDialog({ title, body, confirm = 'Confirmer', cancel = 'Annuler', danger = false }) {
   return new Promise((resolve) => {
@@ -102,7 +140,7 @@ export function confirmDialog({ title, body, confirm = 'Confirmer', cancel = 'An
     const done = (v) => { d.close(); d.remove(); resolve(v); };
     d.append(h('form', { method: 'dialog', class: 'inner', onsubmit: (e) => { e.preventDefault(); done(true); } },
       h('h2', null, title),
-      body ? h('p', { class: 'muted' }, body) : null,
+      body ? (typeof body === 'string' ? h('p', { class: 'muted' }, body) : body) : null,
       h('div', { class: 'btns' },
         cancel ? h('button', { type: 'button', class: 'btn btn-ghost', onclick: () => done(false) }, cancel) : null,
         h('button', { type: 'submit', class: 'btn ' + (danger ? 'btn-danger' : 'btn-primary'), autofocus: true }, confirm))));
@@ -167,7 +205,7 @@ export function checklistDialog({ title, body, items, confirm = 'Valider', empty
     boxes.forEach((b) => b.box.addEventListener('change', sync));
     d.append(h('form', { method: 'dialog', class: 'inner', onsubmit: (e) => { e.preventDefault(); done(boxes.filter((b) => b.box.checked).map((b) => b.it.value)); } },
       h('h2', null, title),
-      body ? h('p', { class: 'muted' }, body) : null,
+      body ? (typeof body === 'string' ? h('p', { class: 'muted' }, body) : body) : null,
       items.length ? h('div', { class: 'checklist' }, grouped(boxes.map(({ it, box }) => ({ it, el: choiceRow(it, box) }))))
         : h('p', { class: 'muted' }, empty),
       h('div', { class: 'btns' },
@@ -197,7 +235,7 @@ export function choiceDialog({ title, body, items, confirm = 'Valider' }) {
       if (picked) done(picked.it.value);
     } },
       h('h2', null, title),
-      body ? h('p', { class: 'muted' }, body) : null,
+      body ? (typeof body === 'string' ? h('p', { class: 'muted' }, body) : body) : null,
       h('div', { class: 'checklist', role: 'radiogroup', 'aria-label': title }, radios.map(({ it, radio }) => choiceRow(it, radio))),
       h('div', { class: 'btns' },
         h('button', { type: 'button', class: 'btn btn-ghost', onclick: () => done(null) }, 'Annuler'),

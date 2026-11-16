@@ -321,17 +321,40 @@ export function missingVoice(lang) {
   if (!canSpeak() || !lang) return false;
   try { return window.speechSynthesis.getVoices().length > 0 && !voiceFor(lang); } catch { return false; }
 }
-/** Lit un texte dans la langue donnée, sans ce qui est entre parenthèses. Coupe la lecture en cours. */
+/**
+ * Chrome et Safari chargent la liste des voix après coup : attend qu'elle arrive (1,5 s au plus).
+ * Résout true si l'appareil a annoncé des voix, false sinon (impossible alors de savoir si une langue manque).
+ */
+export function voicesLoaded(ms = 1500) {
+  if (!canSpeak()) return Promise.resolve(false);
+  const ss = window.speechSynthesis;
+  const count = () => { try { return ss.getVoices().length; } catch { return 0; } };
+  if (count()) return Promise.resolve(true);
+  return new Promise((resolve) => {
+    const done = () => { clearTimeout(t); try { ss.removeEventListener('voiceschanged', on); } catch { /* ignore */ } resolve(count() > 0); };
+    const on = () => { if (count()) done(); };
+    const t = setTimeout(done, ms);
+    try { ss.addEventListener('voiceschanged', on); } catch { /* ignore */ }
+  });
+}
+/** Nom d'une langue de lecture, en minuscules et sans la région (« lt-LT » → « lituanien »). */
+export const langName = (code) => ((LANGS.find(([c]) => c === code) || [, code])[1] || code).replace(/\s*\(.*\)/, '').toLowerCase();
+/**
+ * Lit un texte dans la langue donnée, sans ce qui est entre parenthèses. Coupe la lecture en cours.
+ * Si l'appareil n'a aucune voix pour cette langue, ne lit rien (une autre voix prononcerait faux) et renvoie false.
+ */
 export function speak(text, lang) {
-  if (!canSpeak() || !lang) return;
+  if (!canSpeak() || !lang) return false;
   try {
     window.speechSynthesis.cancel();
+    if (missingVoice(lang)) return false;
     const u = new SpeechSynthesisUtterance(stripParens(text));
     u.lang = lang;
     const voice = voiceFor(lang);
     if (voice) u.voice = voice;
     window.speechSynthesis.speak(u);
-  } catch { /* lecture indisponible */ }
+    return true;
+  } catch { return false; }
 }
 
 // ---------- Stockage local sûr (certains navigateurs bloquent localStorage) ----------

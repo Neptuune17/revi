@@ -1,6 +1,6 @@
 // Mode Cartes : retourner (clic, espace), glisser, trier « je sais / à revoir », étoiles, lecture à voix haute
 // (bouton haut-parleur, et lecture automatique de la face qui apparaît).
-import { h, setChildren, add, icon, toast, segmented, hlbar } from '../ui.js';
+import { h, setChildren, add, icon, toast, segmented, hlbar, warnMissingVoices } from '../ui.js';
 import { store } from '../store.js';
 import { shuffle, ls, ActiveTimer, plural, speak, canSpeak, unlockSpeech } from '../util.js';
 
@@ -113,7 +113,7 @@ export function cardsView(ctx) {
     const frontLang = opts.front === 'term' ? set.termLang : set.defLang;
     const backLang = opts.front === 'term' ? set.defLang : set.termLang;
     const tools = (text, lang) => h('div', { class: 'face-tools' },
-      canSpeak() && lang ? h('button', { class: 'icon-btn', 'aria-label': 'Écouter', onclick: (e) => { e.stopPropagation(); stopSpeech(); speak(text, lang); } }, icon('speaker', 20)) : null,
+      canSpeak() && lang ? h('button', { class: 'icon-btn', 'aria-label': 'Écouter', onclick: (e) => { e.stopPropagation(); stopSpeech(); if (!speak(text, lang)) warnMissingVoices([lang], { again: true }); } }, icon('speaker', 20)) : null,
       h('button', { class: 'icon-btn' + (c.starred ? ' on' : ''), 'aria-label': c.starred ? 'Retirer l’étoile' : 'Ajouter une étoile', onclick: (e) => { e.stopPropagation(); star(); } }, icon(c.starred ? 'starFill' : 'star', 20)));
     const face = (cls, label, text, lang) => h('div', { class: `face bristol ${cls}${text.length > 110 ? ' long' : ''}` },
       h('span', { class: 'side' }, label), tools(text, lang), h('div', null, text));
@@ -262,4 +262,5 @@ export function cardsView(ctx) {
     record(); timer.stop(); stopSpeech();
   });
   start();
+  if (hasLang) warnMissingVoices([set.termLang, set.defLang]);
 }
